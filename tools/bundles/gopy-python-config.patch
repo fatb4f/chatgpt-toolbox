@@ -1,0 +1,70 @@
+diff --git a/bind/gen.go b/bind/gen.go
+index 549f2eb..5d2d8bf 100644
+--- a/bind/gen.go
++++ b/bind/gen.go
+@@ -103 +103 @@ static void _gopy_clear_go_tls(void) {
+-	__asm__ volatile("movq $0, %%%%fs:-8" ::: "memory");
++	__asm__ volatile("movq $0, %%%%fs:-16" ::: "memory");
+diff --git a/bind/utils.go b/bind/utils.go
+index ef25a2a..6093072 100644
+--- a/bind/utils.go
++++ b/bind/utils.go
+@@ -207,11 +207,30 @@ else:
+ 		`"-I` + raw.IncDir + `"`,
+ 	}, " ")
+ 	cfg.LdFlags = strings.Join([]string{
+ 		`"-L` + raw.LibDir + `"`,
+ 		`"-l` + raw.LibPy + `"`,
+ 		raw.ShLibs,
+ 		raw.SysLibs,
+ 	}, " ")
++
++	// Relocatable Python distributions can retain their build-time LIBDIR in
++	// sysconfig while their adjacent python3-config wrapper reports the
++	// relocated include and library paths. Prefer that authoritative surface
++	// when it is available, and retain the sysconfig result as a fallback.
++	configBin := filepath.Join(filepath.Dir(bin), "python3-config")
++	if _, err := os.Stat(configBin); err != nil {
++		configBin = filepath.Join(filepath.Dir(bin), "python-config")
++	}
++	if includes, err := exec.Command(configBin, "--includes").Output(); err == nil {
++		if value := strings.TrimSpace(string(includes)); value != "" {
++			cfg.CFlags = value
++		}
++	}
++	if ldflags, err := exec.Command(configBin, "--embed", "--ldflags").Output(); err == nil {
++		if value := strings.TrimSpace(string(ldflags)); value != "" {
++			cfg.LdFlags = value
++		}
++	}
+ 	cfg.LdDynamicFlags = raw.ShFlags
+ 
+ 	return cfg, nil
+diff --git a/go.mod b/go.mod
+index aec082c..c681e65 100644
+--- a/go.mod
++++ b/go.mod
+@@ -3 +3 @@ module github.com/go-python/gopy
+-go 1.22.0
++go 1.25.0
+@@ -9 +9 @@ require (
+-	golang.org/x/tools v0.29.0
++	golang.org/x/tools v0.47.0
+@@ -13,2 +13,2 @@ require (
+-	golang.org/x/mod v0.22.0 // indirect
+-	golang.org/x/sync v0.10.0 // indirect
++	golang.org/x/mod v0.37.0 // indirect
++	golang.org/x/sync v0.21.0 // indirect
+diff --git a/go.sum b/go.sum
+index 035990d..ea59725 100644
+--- a/go.sum
++++ b/go.sum
+@@ -10,0 +11,2 @@ golang.org/x/mod v0.22.0/go.mod h1:6SkKJ3Xj0I0BrPOZoBy3bdMptDDU9oJrpohJ3eWZ1fY=
++golang.org/x/mod v0.37.0 h1:vF1DjpVEshcIqoEaauuHebaLk1O1forxjxBaVn884JQ=
++golang.org/x/mod v0.37.0/go.mod h1:m8S8VeM9r4dzDwjrKO0a1sZP3YjeMamRRlD+fmR2Q/0=
+@@ -12,0 +15,2 @@ golang.org/x/sync v0.10.0/go.mod h1:Czt+wKu1gCyEFDUtn0jG5QVvpJ6rzVqr5aXyt9drQfk=
++golang.org/x/sync v0.21.0 h1:HLII4xRRTtCRkxYp4HNFF0Js/Og6q2i++KXbg0gHCwM=
++golang.org/x/sync v0.21.0/go.mod h1:9xrNwdLfx4jkKbNva9FpL6vEN7evnE43NNNJQ2LF3+0=
+@@ -14,0 +19,2 @@ golang.org/x/tools v0.29.0/go.mod h1:KMQVMRsVxU6nHCFXrBPhDB8XncLNLM0lIy/F14RP588
++golang.org/x/tools v0.47.0 h1:7Kn5x/d1svx/PzryTsqeoZN4TZwqeH5pGWjefhLi/1Q=
++golang.org/x/tools v0.47.0/go.mod h1:dFHnyTvFWY212G+h7ZY4Vsp/K3U4/7W9TyVaAul8uCA=
