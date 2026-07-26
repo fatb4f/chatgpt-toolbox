@@ -6,21 +6,14 @@ from typing import Any
 from toolbox.commands import build, clean, clean_cache, inspect
 from toolbox.model import to_primitive
 
-COMMANDS = {
-    "inspect": inspect,
-    "build": build,
-    "clean": clean,
-    "clean-cache": clean_cache,
-}
+COMMANDS = {"inspect": inspect, "build": build, "clean": clean, "clean-cache": clean_cache}
 
 
 def main() -> None:
     try:
         from jsonargparse import auto_cli
     except ImportError as error:
-        raise SystemExit(
-            "jsonargparse is required; run the CLI through the root UV project"
-        ) from error
+        raise SystemExit("jsonargparse is required; run the CLI through the root UV project") from error
 
     result: Any = auto_cli(COMMANDS, as_positional=False)
     if result is not None:

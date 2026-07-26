@@ -1,0 +1,32 @@
+diff --git a/.codex/context-model/context_selection_service.cue b/.codex/context-model/context_selection_service.cue
+--- a/.codex/context-model/context_selection_service.cue
++++ b/.codex/context-model/context_selection_service.cue
+@@ -474,7 +474,7 @@
+ 	Request=request:                         #ContextApplicationRequest
+ 	Proposal=proposal:                       #ContextRootProposal
+ 	Policy=policy:                           #ContextSelectionPolicy
+-	CommittedProjection=committedProjection: #GitCommittedSnapshotProjection
++	committedProjection:                     #GitCommittedSnapshotProjection
+ 	Snapshot=snapshot:                       #ContextGraphSnapshot
+ 	EffectivePathEvaluation=effectivePathEvaluation: #GitEffectivePathEvaluation & {
+ 		snapshotID: Snapshot.snapshotID
+@@ -751,8 +751,8 @@
+ 		}]
+ 		allPaths: [for occurrence in committed {occurrence.path}]
+ 	}
+-	CommittedSnapshot=snapshot:           CommittedProjection.graph
+-	CommittedEffectiveView=effectiveView: CommittedEffectivePathEvaluation.view
++	snapshot:      CommittedProjection.graph
++	effectiveView: CommittedEffectivePathEvaluation.view
+ })
+ 
+ #ContextOverlaySelectionEvaluation: close({
+@@ -832,8 +832,8 @@
+ 		}
+ 		allPaths: [for path, _ in _pathSet {path}]
+ 	}
+-	OverlaySnapshot=snapshot:           OverlayProjection.graph
+-	OverlayEffectiveView=effectiveView: OverlayEffectivePathEvaluation.view
++	snapshot:      OverlayProjection.graph
++	effectiveView: OverlayEffectivePathEvaluation.view
+ })

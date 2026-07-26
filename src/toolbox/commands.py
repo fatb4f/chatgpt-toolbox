@@ -16,13 +16,7 @@ def inspect(
     target: str | None = None,
     toolbox_root: Path = Path("."),
 ) -> RepositoryPlan:
-    """Resolve and validate a repository bundle plan without executing it.
-
-    Args:
-        repository: Closed repository registry key.
-        target: Optional target triple; must match registered tool descriptors.
-        toolbox_root: Toolbox checkout containing repository descriptors.
-    """
+    """Resolve and validate a repository release plan without executing it."""
     return inspect_repository(repository, target, toolbox_root=toolbox_root)
 
 
@@ -32,14 +26,7 @@ def build(
     toolbox_root: Path = Path("."),
     pool_root: Path | None = None,
 ) -> BundleResult:
-    """Acquire, pool, build, compose, and package one repository bundle.
-
-    Args:
-        repository: Closed repository registry key.
-        target: Optional target triple; must match registered tool descriptors.
-        toolbox_root: Toolbox checkout containing repository descriptors.
-        pool_root: Optional shared acquisition and projection cache root.
-    """
+    """Build qualified component archives and one installable aggregate release."""
     return build_repository(
         repository,
         target,
@@ -53,13 +40,10 @@ def clean(
     target: str | None = None,
     toolbox_root: Path = Path("."),
 ) -> None:
-    """Remove one repository's disposable composition workspace.
-
-    Shared acquisitions and built projections are deliberately preserved.
-    """
+    """Remove disposable repository composition state while preserving the pool."""
     clean_repository(repository, target, toolbox_root=toolbox_root)
 
 
 def clean_cache(toolbox_root: Path = Path(".")) -> None:
-    """Remove the shared acquisition and built-projection pool."""
+    """Explicitly remove the shared acquisition, projection, and component pool."""
     clean_shared_cache(toolbox_root=toolbox_root)

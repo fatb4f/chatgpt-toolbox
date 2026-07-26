@@ -1,14 +1,7 @@
-from toolbox.model import (
-    AcquisitionKind,
-    AcquisitionSpec,
-    BuildKind,
-    BuildSpec,
-    ToolRole,
-    ToolSpec,
-)
+from toolbox.model import AcquisitionKind, AcquisitionSpec, BuildKind, BuildSpec, ToolRole, ToolSpec
 
 TOOLS_REVISION = "014f87ff5c01915bc90f4f11a6bb8aea3e0edbd7"
-TOOLS_REPOSITORY = "https://github.com/golang/tools.git"
+TOOLS_SOURCE = "https://github.com/golang/tools.git"
 
 SPEC = ToolSpec(
     name="gopls",
@@ -16,7 +9,7 @@ SPEC = ToolSpec(
     target="x86_64-unknown-linux-gnu",
     acquisition=AcquisitionSpec(
         kind=AcquisitionKind.GIT_CHECKOUT,
-        repository=TOOLS_REPOSITORY,
+        repository=TOOLS_SOURCE,
         revision=TOOLS_REVISION,
     ),
     build=BuildSpec(

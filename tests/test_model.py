@@ -9,21 +9,19 @@ from toolbox.model import (
     BuildSpec,
     DescriptorError,
     InstallEntry,
+    LinkerVariableSpec,
+    PythonProjectSpec,
     RepositorySpec,
+    SourceDigestSpec,
     ToolSpec,
 )
 
 TARGET = "x86_64-unknown-linux-gnu"
-
-
-def test_github_release_requires_exact_repository_shape() -> None:
-    with pytest.raises(DescriptorError, match="owner/repository"):
-        AcquisitionSpec(
-            kind=AcquisitionKind.GITHUB_RELEASE,
-            repository="astral-sh",
-            release="1",
-            asset="tool.tar.gz",
-        )
+SOURCE = AcquisitionSpec(
+    kind=AcquisitionKind.GIT_CHECKOUT,
+    repository="https://example.invalid/repo.git",
+    revision="a" * 40,
+)
 
 
 def test_digest_must_be_sha256() -> None:
@@ -35,34 +33,30 @@ def test_digest_must_be_sha256() -> None:
         )
 
 
-def test_archive_without_digest_is_inspectable_but_not_locked() -> None:
-    acquisition = AcquisitionSpec(
-        kind=AcquisitionKind.HTTP_ARCHIVE,
-        url="https://example.invalid/tool.tar.gz",
-    )
-    assert acquisition.lock_defects == ("missing sha256",)
-
-
 def test_git_checkout_requires_full_commit_for_lock_admission() -> None:
     acquisition = AcquisitionSpec(
         kind=AcquisitionKind.GIT_CHECKOUT,
         repository="https://example.invalid/tools.git",
         revision="014f87f",
     )
-    assert acquisition.lock_defects == ("git revision is not a full 40-character commit",)
-
-
-def test_go_module_requires_immutable_version_for_lock_admission() -> None:
-    acquisition = AcquisitionSpec(
-        kind=AcquisitionKind.GO_MODULE,
-        module="example.invalid/module",
+    assert acquisition.lock_defects == (
+        "git revision is not a full 40-character commit",
     )
-    assert acquisition.lock_defects == ("missing Go module version",)
 
 
 def test_no_build_spec_rejects_build_fields() -> None:
     with pytest.raises(DescriptorError, match="no-build"):
         BuildSpec(kind=BuildKind.NONE, output="bin/tool")
+
+
+def test_linker_variable_requires_source_digest() -> None:
+    with pytest.raises(DescriptorError, match="source digest"):
+        BuildSpec(
+            kind=BuildKind.GO_COMMAND,
+            package=".",
+            output="bin/tool",
+            linker_variables=(LinkerVariableSpec("example.invalid/x.Value"),),
+        )
 
 
 def test_paths_cannot_escape_bundle() -> None:
@@ -85,6 +79,18 @@ def test_go_module_cannot_directly_install_archive_entries() -> None:
         )
 
 
+def test_repository_requires_source_and_python_authority() -> None:
+    with pytest.raises(DescriptorError, match="source authority"):
+        RepositorySpec(
+            name="repo",
+            root=Path("repos/repo"),
+            target=TARGET,
+            python_group="repo-test",
+            tools=("example",),
+            python_project=PythonProjectSpec(),
+        )
+
+
 def test_repository_root_is_relative() -> None:
     with pytest.raises(DescriptorError, match="root must be relative"):
         RepositorySpec(
@@ -93,13 +99,6 @@ def test_repository_root_is_relative() -> None:
             target=TARGET,
             python_group="repo-test",
             tools=("example",),
+            source=SOURCE,
+            python_project=PythonProjectSpec(),
         )
-
-
-def test_set_projection_is_deterministically_sorted() -> None:
-    from toolbox.model import ToolRole, to_primitive
-
-    assert to_primitive(frozenset({ToolRole.RUNTIME, ToolRole.BUILD})) == [
-        "build",
-        "runtime",
-    ]

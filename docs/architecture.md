@@ -1,125 +1,112 @@
 # Toolbox architecture
 
-## Descriptor graph
+## Graphs
+
+The toolbox models separate build and release graphs.
 
 ```text
-RepositorySpec
-├── selected target
-├── Python dependency group
-├── ToolSpec references
-└── Program references
+Build graph
+source authority → acquisition → projection → qualification
 
-ToolSpec
-├── identity/version/target
-├── AcquisitionSpec
-├── BuildSpec
-├── install projection
-├── bundle links
-├── roles
-└── dependency edges
+Release graph
+qualified projection → component archive → aggregate → installation
 ```
 
-The registry is closed through immutable mappings. Graph resolution rejects unknown nodes, target mismatches, missing dependencies, and cycles.
+`RepositorySpec` selects tools and programs, declares repository-source and Python-lock authority, and defines the component DAG. `ToolSpec` declares acquisition, build, install, probe, role, and dependency contracts.
 
-## Acquisition matrix
+## Acquisition pool
 
-| Descriptor kind | Adapter |
+| Kind | Admission |
 | --- | --- |
-| `github-release` | exact GitHub asset metadata plus SHA-256 |
-| `http-archive` | HTTPS download plus SHA-256 verification |
-| `git-checkout` | detached checkout of a full commit |
-| `go-module` | immutable module identity consumed by Go build logic |
-| `local-source` | toolbox-owned relative source path |
-
-Acquisitions are pooled by the canonical `AcquisitionSpec`, not by tool or repository name. Two tools with the same immutable source resolve to the same cached path.
-
-## Build matrix
-
-| Build kind | Behavior |
-| --- | --- |
-| `none` | extract and stage declared entries |
-| `go-command` | use the pooled Go compiler and emit one isolated projection |
-| `make-command` | build source and install into one isolated projection |
-
-Go build controls are typed:
+| `github-release` | exact asset identity plus SHA-256 |
+| `http-archive` | HTTPS plus SHA-256 |
+| `git-checkout` | detached full commit with no tracked or untracked changes |
+| `go-module` | immutable module version |
+| `local-source` | toolbox-relative source tree digest |
 
 ```text
-trimpath
-build_vcs
-ldflags
+acquisition key = SHA-256(canonical AcquisitionSpec)
 ```
 
-The dotfiles source-built commands use the CUEstrap flags:
+Equivalent immutable acquisitions share one cache entry independently of tool and repository names.
+
+## Build projections
 
 ```text
--trimpath
--buildvcs=true
--ldflags=-s -w
+projection key = SHA-256(
+    ToolSpec
+    + acquired identity
+    + resolved source digest/linker values
+    + dependency projection keys
+)
 ```
 
-## Two-level pool
+Go builds use the pooled Go toolchain, isolated output prefixes, and an external target-scoped module/build cache. Typed controls include `trimpath`, `build_vcs`, linker flags, source digest projections, and source-derived linker variables.
+
+A cached projection is reusable only when its marker and tree checksum agree.
+
+## Component DAG
+
+| Component | Contents | Admission gate |
+| --- | --- | --- |
+| `native-base` | reusable runtimes and language tooling | runtime probes |
+| `go-programs` | repository-specific Go commands | program-specific runtime qualification |
+| `repository-source` | exact tracked source projection | repository CUE qualification suite |
+| `python-projects` | lock authority, offline uv closure, command wrappers | frozen uv synchronization |
+
+Component keys contain their complete immutable inputs and dependency authority. Qualification runs only when a component must be created; a checksum-valid cached component reuses its stored report.
+
+Each component archive is reopened after creation and checked for:
+
+- numeric owner/group `0/0`;
+- epoch timestamps;
+- safe paths and links;
+- byte-equivalence with its admitted staging tree.
+
+## Aggregate release
 
 ```text
-immutable acquisition
-        ↓
-AcquisitionSpec hash
-        ↓
-shared archive or checkout
-        ↓
-ToolSpec + source identity + dependency projection keys
-        ↓
-verified immutable tool projection
-        ↓
-repository composition prefix
+release/
+├── install.sh
+├── manifest.json
+├── release-lock.json
+├── SHA256SUMS
+├── <component>.tar.zst
+├── <component>.tar.zst.sha256
+└── <repository>-tools-linux-amd64.tar.zst
 ```
 
-Projection markers contain a tree SHA-256. A missing, malformed, or changed projection is rebuilt rather than trusted.
+`release-lock.json` records tool and component DAG authority. Its canonical SHA-256 is the release lock digest. `manifest.json` binds that digest, target constraints, component records, aggregate name/size/digest, and installer host requirements.
 
-The dependency projection keys are part of the build key. Changing the pooled Go compiler or a declared module edge therefore invalidates dependent binaries without invalidating unrelated tools.
+The aggregate archive is a deterministic merge of admitted components. Conflicting paths are rejected unless they are identical.
 
-## Composition
+## Installation
 
-Tool projections are merged into a fresh repository prefix in topological order. Files are copied from the immutable pool so the disposable composition cannot mutate cached projections. Conflicting paths are rejected unless they are byte-identical (or identical symlinks).
+The outer installer verifies the release authority and safely extracts the aggregate. The embedded installer then:
 
-The composition prefix receives only repository-level metadata after projection merge:
+1. verifies the archive projection;
+2. selects `versions/<lock-digest>`;
+3. materializes any Python project with bundled uv and offline cache;
+4. verifies the installed projection while excluding declared mutable paths;
+5. atomically updates `current`.
 
 ```text
-activate
-native-lock.json
+<prefix>/
+├── versions/<lock-digest>/
+└── current -> versions/<lock-digest>
 ```
 
-Cache hit/miss state is intentionally excluded from `native-lock.json`; a warm build and cold build have the same release authority.
-
-## Bundle invariants
+## Invariants
 
 ```text
-one repository build → one published archive
-
-all network archives have pinned SHA-256
-all Git checkouts use full commit IDs
-all Go modules have immutable versions
-all dependency edges resolve inside the selected closure
-the selected graph is acyclic
-repository-owned Go programs require declared module pins in go.mod
-Go compiler and module caches remain outside packaged projections
-archive paths cannot escape extraction/staging roots
-pooled projections are checksum-verified before reuse
-projection conflicts are rejected
-archive metadata is normalized
+all transport sources are immutable and admitted
+all dependency graphs are closed and acyclic
+pooled checkouts are clean
+projection/component markers match tree and archive digests
+qualification precedes component publication
+cache hit/miss state is absent from release authority
+cold and warm releases are byte-identical
+archive paths cannot escape extraction roots
+component and aggregate tar metadata is deterministic
+one repository release installs through a stable current symlink
 ```
-
-## Workspace ownership
-
-```text
-.toolbox-cache/                persistent, shared, explicitly evicted
-.toolbox-work/<repo-target>/   disposable repository composition
-repos/<repo>/dist/             published combined archive
-```
-
-`toolbox clean` removes only the disposable repository workspace. `toolbox clean-cache` removes the shared pool.
-
-## Constructor boundary
-
-The package does not bootstrap every host primitive. `uv` runs the Python control plane, `git` materializes immutable source revisions, and `make` plus a native C toolchain build Lua. Public binary archives are downloaded directly over HTTPS and admitted by SHA-256.
-
-The resulting bundle carries its own pinned Python, Go, and UV runtimes. Host tools remain constructors, not bundle authority.

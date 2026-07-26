@@ -16,7 +16,8 @@ class StagingError(RuntimeError):
 
 def _safe_destination(root: Path, member: str) -> Path:
     destination = (root / member).resolve()
-    if destination != root.resolve() and root.resolve() not in destination.parents:
+    resolved_root = root.resolve()
+    if destination != resolved_root and resolved_root not in destination.parents:
         raise StagingError(f"archive member escapes extraction root: {member!r}")
     return destination
 
@@ -92,10 +93,11 @@ def _same_projection_entry(source: Path, destination: Path) -> bool:
 
 
 def stage_projection(source_root: Path, prefix: Path) -> None:
-    """Merge one immutable pooled projection into a repository bundle prefix."""
+    """Merge one immutable pooled projection into an isolated staging root."""
     prefix.mkdir(parents=True, exist_ok=True)
     for source in sorted(
-        source_root.rglob("*"), key=lambda item: item.relative_to(source_root).as_posix()
+        source_root.rglob("*"),
+        key=lambda item: item.relative_to(source_root).as_posix(),
     ):
         relative = source.relative_to(source_root)
         destination = prefix / relative
@@ -117,17 +119,8 @@ def stage_projection(source_root: Path, prefix: Path) -> None:
         shutil.copy2(source, destination)
 
 
-def write_activation(prefix: Path) -> Path:
-    activation = prefix / "activate"
-    activation.write_text(
-        "#!/bin/sh\n"
-        'TOOLBOX_ROOT=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)\n'
-        "export TOOLBOX_ROOT\n"
-        'export PATH="$TOOLBOX_ROOT/bin:$PATH"\n'
-        'export GOROOT="$TOOLBOX_ROOT/libexec/go"\n'
-        "export GOTOOLCHAIN=local\n"
-        'export GOBIN="$TOOLBOX_ROOT/bin"\n',
-        encoding="utf-8",
-    )
-    activation.chmod(0o755)
-    return activation
+def copy_tree(source: Path, destination: Path) -> None:
+    if not source.is_dir():
+        raise StagingError(f"expected source tree: {source}")
+    destination.mkdir(parents=True, exist_ok=True)
+    shutil.copytree(source, destination, dirs_exist_ok=True, symlinks=True)
