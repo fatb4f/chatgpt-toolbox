@@ -94,3 +94,12 @@ def test_repository_root_is_relative() -> None:
             python_group="repo-test",
             tools=("example",),
         )
+
+
+def test_set_projection_is_deterministically_sorted() -> None:
+    from toolbox.model import ToolRole, to_primitive
+
+    assert to_primitive(frozenset({ToolRole.RUNTIME, ToolRole.BUILD})) == [
+        "build",
+        "runtime",
+    ]

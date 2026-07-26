@@ -14,6 +14,7 @@ def build(
     repository: str,
     target: str | None = None,
     toolbox_root: Path = Path("."),
+    pool_root: Path | None = None,
 ) -> BundleResult: ...
 
 
@@ -22,9 +23,12 @@ def clean(
     target: str | None = None,
     toolbox_root: Path = Path("."),
 ) -> None: ...
+
+
+def clean_cache(toolbox_root: Path = Path(".")) -> None: ...
 ```
 
-`jsonargparse.auto_cli` exposes only these typed functions. Repository names, tool names, versions, sources, and checksums are not user-overridable CLI parameters.
+`jsonargparse.auto_cli` exposes only these typed functions. Repository names, tool names, versions, sources, checksums, and build flags are not user-overridable CLI parameters.
 
 ## Control flow
 
@@ -41,7 +45,13 @@ topological ordering
     ↓
 lock admission
     ↓
-operation execution
+shared acquisition lookup/build
+    ↓
+shared projection lookup/build
+    ↓
+repository composition
+    ↓
+package one archive
 ```
 
 ## Inspect
@@ -67,42 +77,45 @@ plan.lock_defects == ()
 
 Only then may it:
 
-1. resolve a GitHub release asset against release metadata;
-2. download through `gh release download`;
-3. verify the descriptor SHA-256;
-4. acquire HTTP archives or immutable Git revisions;
-5. build with the staged toolchain;
-6. stage into one prefix;
-7. write `native-lock.json`;
-8. create a normalized deterministic `tar.gz` archive.
+1. resolve an immutable acquisition identity;
+2. reuse or acquire the shared archive/checkout;
+3. verify SHA-256 or exact Git revision;
+4. derive a projection key from the complete build closure;
+5. reuse or build the isolated tool projection;
+6. checksum the projection before reuse;
+7. merge projections into one fresh repository prefix;
+8. write `native-lock.json` without cache-hit state;
+9. create one normalized deterministic `tar.gz` archive.
 
-## GitHub release adapter
+`pool_root` defaults to `.toolbox-cache`. It may be redirected when several toolbox checkouts should share a cache.
 
-The adapter first requests release metadata:
+## Clean
 
-```bash
-gh release view "$TAG" \
-  --repo "$REPOSITORY" \
-  --json assets
-```
-
-It requires exactly one asset with the descriptor's exact name before running:
-
-```bash
-gh release download "$TAG" \
-  --repo "$REPOSITORY" \
-  --pattern "$ASSET" \
-  --dir "$DOWNLOAD_DIR"
-```
-
-Transport identity and content identity remain separate gates:
+`clean` removes only:
 
 ```text
-release metadata exact-name match
-    ∧
-local SHA-256 equals descriptor SHA-256
+.toolbox-work/<repository>-<target>
+```
+
+It does not remove immutable acquisitions or projections.
+
+`clean-cache` is the explicit destructive operation for:
+
+```text
+.toolbox-cache/
+```
+
+## Transport adapters
+
+Public dotfiles bundle assets use exact HTTPS URLs plus SHA-256. The generic GitHub release adapter remains available for descriptors that require release metadata validation, but it is not selected by the current dotfiles closure.
+
+Git checkout sources are admitted only by a full 40-character commit and are reused only while both conditions remain true:
+
+```text
+HEAD == requested revision
+tracked working tree is clean
 ```
 
 ## Deferred authority projection
 
-A later CUE layer can validate or generate the Python descriptors and command façade. It should not duplicate execution behavior. The Python operations remain adapters for acquisition, building, staging, and packaging.
+A later CUE layer can validate or generate the Python descriptors and command façade. It should not duplicate execution behavior. Python remains the adapter for acquisition, pooling, building, composition, and packaging.

@@ -1,19 +1,32 @@
-from toolbox.model import AcquisitionKind, AcquisitionSpec, BuildKind, BuildSpec, ToolRole, ToolSpec
+from toolbox.model import (
+    AcquisitionKind,
+    AcquisitionSpec,
+    BuildKind,
+    BuildSpec,
+    ToolRole,
+    ToolSpec,
+)
+
+TOOLS_REVISION = "014f87ff5c01915bc90f4f11a6bb8aea3e0edbd7"
+TOOLS_REPOSITORY = "https://github.com/golang/tools.git"
 
 SPEC = ToolSpec(
     name="gopls",
     version="0.23.0",
     target="x86_64-unknown-linux-gnu",
     acquisition=AcquisitionSpec(
-        kind=AcquisitionKind.GO_MODULE,
-        module="golang.org/x/tools/gopls",
-        version="v0.23.0",
+        kind=AcquisitionKind.GIT_CHECKOUT,
+        repository=TOOLS_REPOSITORY,
+        revision=TOOLS_REVISION,
     ),
     build=BuildSpec(
         kind=BuildKind.GO_COMMAND,
         requires=("go",),
-        package="golang.org/x/tools/gopls",
+        source_subdir="gopls",
+        package=".",
         output="bin/gopls",
+        build_vcs=True,
+        ldflags=("-s", "-w"),
     ),
     roles=frozenset({ToolRole.RUNTIME}),
     probes=(("gopls", "version"),),

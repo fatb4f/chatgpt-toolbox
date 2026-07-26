@@ -12,5 +12,8 @@ bundle-dotfiles:
 clean repository="dotfiles":
     uv run toolbox clean --repository {{repository}}
 
+clean-cache:
+    uv run toolbox clean-cache
+
 test:
     uv run --group dev pytest

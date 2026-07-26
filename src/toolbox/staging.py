@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import filecmp
 import os
 import shutil
 import tarfile
@@ -43,7 +44,9 @@ def extract_archive(archive: Path, destination: Path) -> Path:
 def _copy_entry(source: Path, destination: Path, kind: InstallEntryKind) -> None:
     resolved_kind = kind
     if kind is InstallEntryKind.AUTO:
-        resolved_kind = InstallEntryKind.TREE if source.is_dir() else InstallEntryKind.FILE
+        resolved_kind = (
+            InstallEntryKind.TREE if source.is_dir() else InstallEntryKind.FILE
+        )
     if resolved_kind is InstallEntryKind.TREE:
         if not source.is_dir():
             raise StagingError(f"expected install tree: {source}")
@@ -56,7 +59,9 @@ def _copy_entry(source: Path, destination: Path, kind: InstallEntryKind) -> None
         shutil.copy2(source, destination)
 
 
-def stage_entries(source_root: Path, prefix: Path, entries: tuple[InstallEntry, ...]) -> None:
+def stage_entries(
+    source_root: Path, prefix: Path, entries: tuple[InstallEntry, ...]
+) -> None:
     for entry in entries:
         source = source_root / entry.source
         destination = prefix / entry.destination
@@ -71,16 +76,57 @@ def stage_links(prefix: Path, links: tuple[LinkSpec, ...]) -> None:
         os.symlink(link.target, destination)
 
 
+def _same_projection_entry(source: Path, destination: Path) -> bool:
+    if source.is_symlink() or destination.is_symlink():
+        return (
+            source.is_symlink()
+            and destination.is_symlink()
+            and os.readlink(source) == os.readlink(destination)
+        )
+    return (
+        source.is_file()
+        and destination.is_file()
+        and (source.stat().st_mode & 0o7777) == (destination.stat().st_mode & 0o7777)
+        and filecmp.cmp(source, destination, shallow=False)
+    )
+
+
+def stage_projection(source_root: Path, prefix: Path) -> None:
+    """Merge one immutable pooled projection into a repository bundle prefix."""
+    prefix.mkdir(parents=True, exist_ok=True)
+    for source in sorted(
+        source_root.rglob("*"), key=lambda item: item.relative_to(source_root).as_posix()
+    ):
+        relative = source.relative_to(source_root)
+        destination = prefix / relative
+        if source.is_dir() and not source.is_symlink():
+            if destination.exists() and not destination.is_dir():
+                raise StagingError(
+                    f"tool projections conflict at {relative.as_posix()}"
+                )
+            destination.mkdir(parents=True, exist_ok=True)
+            continue
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        if destination.exists() or destination.is_symlink():
+            if _same_projection_entry(source, destination):
+                continue
+            raise StagingError(f"tool projections conflict at {relative.as_posix()}")
+        if source.is_symlink():
+            os.symlink(os.readlink(source), destination)
+            continue
+        shutil.copy2(source, destination)
+
+
 def write_activation(prefix: Path) -> Path:
     activation = prefix / "activate"
     activation.write_text(
         "#!/bin/sh\n"
-        "TOOLBOX_ROOT=$(CDPATH= cd -- \"$(dirname -- \"$0\")\" && pwd)\n"
+        'TOOLBOX_ROOT=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)\n'
         "export TOOLBOX_ROOT\n"
-        "export PATH=\"$TOOLBOX_ROOT/bin:$PATH\"\n"
-        "export GOROOT=\"$TOOLBOX_ROOT/libexec/go\"\n"
+        'export PATH="$TOOLBOX_ROOT/bin:$PATH"\n'
+        'export GOROOT="$TOOLBOX_ROOT/libexec/go"\n'
         "export GOTOOLCHAIN=local\n"
-        "export GOBIN=\"$TOOLBOX_ROOT/bin\"\n",
+        'export GOBIN="$TOOLBOX_ROOT/bin"\n',
         encoding="utf-8",
     )
     activation.chmod(0o755)

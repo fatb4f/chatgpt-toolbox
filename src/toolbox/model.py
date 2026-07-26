@@ -72,13 +72,17 @@ class AcquisitionSpec:
 
     def __post_init__(self) -> None:
         if self.sha256 is not None and not _SHA256_RE.fullmatch(self.sha256):
-            raise DescriptorError("sha256 must contain exactly 64 lowercase hexadecimal characters")
+            raise DescriptorError(
+                "sha256 must contain exactly 64 lowercase hexadecimal characters"
+            )
 
         match self.kind:
             case AcquisitionKind.GITHUB_RELEASE:
                 repository = _require_nonempty("repository", self.repository)
                 if repository.count("/") != 1:
-                    raise DescriptorError("GitHub repository must use owner/repository form")
+                    raise DescriptorError(
+                        "GitHub repository must use owner/repository form"
+                    )
                 _require_nonempty("release", self.release)
                 _require_nonempty("asset", self.asset)
             case AcquisitionKind.HTTP_ARCHIVE:
@@ -87,8 +91,13 @@ class AcquisitionSpec:
                     raise DescriptorError("HTTP archive URL must use HTTPS")
             case AcquisitionKind.GIT_CHECKOUT:
                 repository = _require_nonempty("repository", self.repository)
-                if not (repository.startswith("https://") or repository.startswith("ssh://")):
-                    raise DescriptorError("Git checkout repository must use HTTPS or SSH")
+                if not (
+                    repository.startswith("https://")
+                    or repository.startswith("ssh://")
+                ):
+                    raise DescriptorError(
+                        "Git checkout repository must use HTTPS or SSH"
+                    )
                 _require_nonempty("revision", self.revision)
             case AcquisitionKind.GO_MODULE:
                 _require_nonempty("module", self.module)
@@ -99,7 +108,10 @@ class AcquisitionSpec:
     @property
     def lock_defects(self) -> tuple[str, ...]:
         defects: list[str] = []
-        if self.kind in {AcquisitionKind.GITHUB_RELEASE, AcquisitionKind.HTTP_ARCHIVE}:
+        if self.kind in {
+            AcquisitionKind.GITHUB_RELEASE,
+            AcquisitionKind.HTTP_ARCHIVE,
+        }:
             if self.sha256 is None:
                 defects.append("missing sha256")
         elif self.kind is AcquisitionKind.GIT_CHECKOUT:
@@ -121,6 +133,9 @@ class BuildSpec:
     package: str | None = None
     output: str | None = None
     source_subdir: str = "."
+    trimpath: bool = True
+    build_vcs: bool = False
+    ldflags: tuple[str, ...] = ()
     make_target: str | None = None
     install_target: str | None = None
     environment: Mapping[str, str] = field(default_factory=dict)
@@ -129,18 +144,36 @@ class BuildSpec:
         object.__setattr__(self, "environment", MappingProxyType(dict(self.environment)))
         for dependency in self.requires:
             if not _NAME_RE.fullmatch(dependency):
-                raise DescriptorError(f"invalid build dependency name: {dependency!r}")
+                raise DescriptorError(
+                    f"invalid build dependency name: {dependency!r}"
+                )
+        for flag in self.ldflags:
+            if not flag or "\x00" in flag or "\n" in flag or "\r" in flag:
+                raise DescriptorError("Go linker flags must be non-empty single-line values")
         _validate_relative_posix("source_subdir", self.source_subdir)
 
         match self.kind:
             case BuildKind.NONE:
-                if self.package or self.output or self.make_target or self.install_target:
-                    raise DescriptorError("no-build specifications cannot declare build commands")
+                if (
+                    self.package
+                    or self.output
+                    or self.make_target
+                    or self.install_target
+                    or self.build_vcs
+                    or self.ldflags
+                ):
+                    raise DescriptorError(
+                        "no-build specifications cannot declare build commands"
+                    )
             case BuildKind.GO_COMMAND:
                 _require_nonempty("Go package", self.package)
                 output = _require_nonempty("Go output", self.output)
                 _validate_relative_posix("Go output", output, allow_dot=False)
             case BuildKind.MAKE_COMMAND:
+                if self.build_vcs or self.ldflags:
+                    raise DescriptorError(
+                        "make-command specifications cannot declare Go build flags"
+                    )
                 _require_nonempty("make target", self.make_target)
                 _require_nonempty("make install target", self.install_target)
 
@@ -190,7 +223,9 @@ class ToolSpec:
             if not _NAME_RE.fullmatch(dependency):
                 raise DescriptorError(f"invalid dependency name: {dependency!r}")
         if self.acquisition.kind is AcquisitionKind.GO_MODULE and self.install:
-            raise DescriptorError("go-module descriptors do not directly install archive entries")
+            raise DescriptorError(
+                "go-module descriptors do not directly install archive entries"
+            )
         for probe in self.probes:
             if not probe or any(not part for part in probe):
                 raise DescriptorError("version probes must be non-empty argv tuples")
@@ -201,7 +236,9 @@ class ToolSpec:
 
     @property
     def lock_defects(self) -> tuple[str, ...]:
-        return tuple(f"{self.name}: {defect}" for defect in self.acquisition.lock_defects)
+        return tuple(
+            f"{self.name}: {defect}" for defect in self.acquisition.lock_defects
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -225,7 +262,9 @@ class RepositorySpec:
             raise DescriptorError("repository must select at least one tool")
         for name in (*self.tools, *self.programs):
             if not _NAME_RE.fullmatch(name):
-                raise DescriptorError(f"invalid selected tool/program name: {name!r}")
+                raise DescriptorError(
+                    f"invalid selected tool/program name: {name!r}"
+                )
 
     @property
     def dist_dir(self) -> Path:
@@ -273,8 +312,14 @@ def to_primitive(value: Any) -> Any:
         return value.value
     if isinstance(value, Mapping):
         return {str(key): to_primitive(item) for key, item in value.items()}
-    if isinstance(value, (tuple, list, frozenset, set)):
+    if isinstance(value, (tuple, list)):
         return [to_primitive(item) for item in value]
+    if isinstance(value, (frozenset, set)):
+        items = [to_primitive(item) for item in value]
+        return sorted(items, key=repr)
     if is_dataclass(value):
-        return {descriptor.name: to_primitive(getattr(value, descriptor.name)) for descriptor in fields(value)}
+        return {
+            descriptor.name: to_primitive(getattr(value, descriptor.name))
+            for descriptor in fields(value)
+        }
     return value

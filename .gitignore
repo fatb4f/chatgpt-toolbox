@@ -3,6 +3,7 @@ __pycache__/
 .pytest_cache/
 .venv/
 .toolbox-work/
+.toolbox-cache/
 .tmp/
 repos/*/dist/*
 !repos/*/dist/.gitkeep
