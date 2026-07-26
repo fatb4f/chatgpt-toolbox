@@ -28,5 +28,5 @@ SPEC = ToolSpec(
         ldflags=("-s", "-w"),
     ),
     roles=frozenset({ToolRole.RUNTIME}),
-    probes=(("goimports", "-h"),),
+    probes=(),
 )
