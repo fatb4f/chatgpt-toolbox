@@ -1,8 +1,39 @@
 [project]
-name = "chatgpt toolbox"
+name = "chatgpt-toolbox"
 version = "0.1.0"
-description = "bundle source for repo-specific tooling"
-requires-python = ">=3.14,<3.15"
+description = "Typed repository-specific native tool bundle builder"
+requires-python = ">=3.13,<3.15"
+dependencies = [
+  "jsonargparse>=4.40,<5",
+]
+
+[project.scripts]
+toolbox = "toolbox.cli:main"
+
+[dependency-groups]
+dev = [
+  "pytest>=8.4,<10",
+]
+repo-dotfiles = [
+  "dspy==3.2.1",
+  "duckdb>=1.5.5",
+  "hypothesis>=6.161.2",
+  "marimo==0.23.14",
+  "pydantic==2.13.4",
+  "pytest>=9.1.1",
+]
+
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/toolbox"]
+
+[tool.pytest.ini_options]
+addopts = "-q"
+pythonpath = ["src"]
+testpaths = ["tests"]
 
 [tool.uv]
 package = true

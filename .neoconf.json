@@ -1,0 +1,9 @@
+{
+  "lspconfig": {
+    "ty": {
+      "ty": {
+        "diagnosticMode": "openFilesOnly"
+      }
+    }
+  }
+}

@@ -1,0 +1,1 @@
+"""Immutable native tool descriptors."""

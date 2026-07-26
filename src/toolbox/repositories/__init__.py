@@ -1,0 +1,1 @@
+"""Closed repository bundle descriptors."""

@@ -1,268 +1,108 @@
+# CLI contract
+
+## Surface
+
+```python
+def inspect(
+    repository: str,
+    target: str | None = None,
+    toolbox_root: Path = Path("."),
+) -> RepositoryPlan: ...
+
+
+def build(
+    repository: str,
+    target: str | None = None,
+    toolbox_root: Path = Path("."),
+) -> BundleResult: ...
+
+
+def clean(
+    repository: str,
+    target: str | None = None,
+    toolbox_root: Path = Path("."),
+) -> None: ...
+```
+
+`jsonargparse.auto_cli` exposes only these typed functions. Repository names, tool names, versions, sources, and checksums are not user-overridable CLI parameters.
+
+## Control flow
+
 ```text
-CUE logical kernel
-├── domain types
-├── operation signatures
-├── admissible graph
-├── properties
-├── effects
-└── command declarations
-        ↓ code generation
-Generated Pydantic models
-Generated Protocols
-Generated command façade
-        ↓ introspection
-jsonargparse
-        ↓
 CLI arguments
-config files
-environment variables
-subcommands
-object instantiation
-        ↓
-typed handlers
+    ↓
+closed repository lookup
+    ↓
+target compatibility validation
+    ↓
+dependency closure validation
+    ↓
+topological ordering
+    ↓
+lock admission
+    ↓
+operation execution
 ```
 
-Verification remains:
+## Inspect
+
+`inspect` resolves the complete graph without transport or filesystem mutation. The result includes:
+
+- repository and target;
+- root UV dependency group;
+- deterministic output path;
+- topologically ordered nodes;
+- acquisition and build descriptors;
+- unresolved lock defects.
+
+A plan is admissible exactly when `lock_defects` is empty.
+
+## Build
+
+`build` has a fail-closed precondition:
 
 ```text
-CUE         graph and policy admission
-ty          static Python conformance
-Pydantic    runtime value conformance
-Hypothesis  behavioral property testing
-Ruff        source policy and defect detection
-pytest      examples and integration
+plan.lock_defects == ()
 ```
 
-## Important authority constraint
+Only then may it:
 
-By default, `jsonargparse` treats Python signatures as the CLI description:
+1. resolve a GitHub release asset against release metadata;
+2. download through `gh release download`;
+3. verify the descriptor SHA-256;
+4. acquire HTTP archives or immutable Git revisions;
+5. build with the staged toolchain;
+6. stage into one prefix;
+7. write `native-lock.json`;
+8. create a normalized deterministic `tar.gz` archive.
 
-```python
-def profile(
-    root: Path,
-    timezone: str = "UTC",
-    strict: bool = False,
-) -> DailyProfile:
-    ...
+## GitHub release adapter
+
+The adapter first requests release metadata:
+
+```bash
+gh release view "$TAG" \
+  --repo "$REPOSITORY" \
+  --json assets
 ```
 
-Instead:
+It requires exactly one asset with the descriptor's exact name before running:
+
+```bash
+gh release download "$TAG" \
+  --repo "$REPOSITORY" \
+  --pattern "$ASSET" \
+  --dir "$DOWNLOAD_DIR"
+```
+
+Transport identity and content identity remain separate gates:
 
 ```text
-CUE
-  ↓ generates
-Python command façade
-  ↓ inspected by
-jsonargparse
+release metadata exact-name match
+    ∧
+local SHA-256 equals descriptor SHA-256
 ```
 
-For example:
+## Deferred authority projection
 
-```python
-# Generated from CUE. Do not edit.
-
-from pathlib import Path
-
-from codex_profile.application import execute_profile
-from codex_profile.generated.models import DailyProfile
-
-
-def profile(
-    roots: list[Path],
-    timezone: str = "UTC",
-    strict: bool = False,
-) -> DailyProfile:
-    """Generate a daily Codex usage profile.
-
-    Args:
-        roots: Session files or directories to scan.
-        timezone: Timezone used for daily aggregation.
-        strict: Reject malformed events instead of recording diagnostics.
-    """
-    return execute_profile(
-        roots=roots,
-        timezone=timezone,
-        strict=strict,
-    )
-```
-
-Then the entire CLI can be:
-
-```python
-from jsonargparse import auto_cli
-
-from codex_profile.generated.commands import profile
-
-
-def main() -> None:
-    result = auto_cli({"profile": profile})
-
-    if result is not None:
-        print(result.model_dump_json(indent=2))
-```
-
-No generated Typer syntax is required.
-
-## Argument linking
-
-Its argument-linking facility is especially relevant. It can propagate one parsed value into another target:
-
-```python
-parser.link_arguments(
-    "scan.timezone",
-    "aggregate.timezone",
-    apply_on="parse",
-)
-```
-
-It can also link instantiated objects, automatically deriving an instantiation order. The linked instantiation graph must be a DAG.
-
-This overlaps with part of the CUE kernel, but the boundary matters:
-
-```text
-jsonargparse argument links
-    configuration propagation
-    object-instantiation ordering
-
-CUE operation graph
-    type compatibility
-    admissible operation composition
-    effects and policy
-    behavioral declarations
-```
-
-`link_arguments` should therefore be treated as an **execution adapter feature**, not the authoritative logical graph.
-
-CUE can generate the link declarations:
-
-```cue
-command: {
-	name: "profile"
-
-	links: [
-		{
-			source:  "scan.timezone"
-			target:  "aggregate.timezone"
-			applyOn: "parse"
-		},
-	]
-}
-```
-
-Projected Python:
-
-```python
-parser.link_arguments(
-    "scan.timezone",
-    "aggregate.timezone",
-    apply_on="parse",
-)
-```
-
-## Pydantic integration
-
-The repository explicitly tests Pydantic models, constrained fields, nested models, dataclasses, defaults, and discriminated unions. For example, a discriminated union can be selected through CLI dot syntax and instantiated as the appropriate Pydantic subtype.
-
-That permits CUE-generated operation unions such as:
-
-```cue
-#Source:
-	#FilesystemSource |
-	#StdinSource
-```
-
-to project into:
-
-```python
-class FilesystemSource(BaseModel):
-    kind: Literal["filesystem"]
-    roots: list[Path]
-
-
-class StdinSource(BaseModel):
-    kind: Literal["stdin"]
-
-
-Source = Annotated[
-    FilesystemSource | StdinSource,
-    Field(discriminator="kind"),
-]
-```
-
-`jsonargparse` can then expose the generated union through the CLI/config surface.
-
-## JSON Schema support
-
-The library can validate an individual JSON or YAML argument against JSON Schema, including schema defaults. Its documented implementation currently uses Draft 7.
-
-That may be useful for opaque external payloads:
-
-```python
-parser.add_argument(
-    "--event",
-    action=ActionJsonSchema(schema=event_schema),
-)
-```
-
-But for the main internal domain:
-
-```text
-CUE → Pydantic → jsonargparse
-```
-
-is preferable to:
-
-```text
-CUE → JSON Schema → jsonargparse → untyped dictionary
-```
-
-The Pydantic path preserves Python static types and works better with `ty`.
-
-## Alpha architecture revision
-
-```text
-kernel/
-├── domain.cue
-├── operations.cue
-├── pipelines.cue
-├── properties.cue
-└── commands.cue
-
-generated/
-├── models.py
-├── protocols.py
-├── commands.py
-└── plan.json
-
-codex_profile/
-├── handlers/
-├── application.py
-├── runtime.py
-├── registry.py
-└── cli.py
-```
-
-`cli.py` becomes minimal:
-
-```python
-from jsonargparse import auto_cli
-
-from codex_profile.generated.commands import COMMANDS
-
-
-def main() -> None:
-    auto_cli(COMMANDS)
-```
-
-## Updated recommendation
-
-For the alpha:
-
-* use **CUE** as contract and graph authority;
-* generate **Pydantic models**, typed protocols, and a thin command façade;
-* use **jsonargparse instead of Typer**;
-* keep the runtime registry closed;
-* use `ty`, Ruff, Pydantic, Hypothesis, and pytest as previously defined;
-* defer a custom CLI generator unless `jsonargparse` exposes an actual blocking limitation.
-
-This substantially reduces prototype infrastructure while preserving the schema-first control model.
+A later CUE layer can validate or generate the Python descriptors and command façade. It should not duplicate execution behavior. The Python operations remain adapters for acquisition, building, staging, and packaging.
