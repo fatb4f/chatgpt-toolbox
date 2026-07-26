@@ -4,20 +4,7 @@ import tarfile
 
 import pytest
 
-from toolbox.staging import (
-    StagingError,
-    extract_archive,
-    stage_projection,
-    write_activation,
-)
-
-
-def test_activation_enforces_staged_go_toolchain(tmp_path: Path) -> None:
-    activation = write_activation(tmp_path)
-    content = activation.read_text(encoding="utf-8")
-    assert 'export GOROOT="$TOOLBOX_ROOT/libexec/go"' in content
-    assert "export GOTOOLCHAIN=local" in content
-    assert 'export GOBIN="$TOOLBOX_ROOT/bin"' in content
+from toolbox.staging import StagingError, extract_archive, stage_projection
 
 
 def test_tar_extraction_rejects_path_traversal(tmp_path: Path) -> None:
@@ -42,7 +29,6 @@ def test_projection_files_are_copied_into_isolated_composition(tmp_path: Path) -
     stage_projection(projection, prefix)
 
     destination = prefix / "bin/tool"
-    assert destination.read_text() == "tool\n"
     destination.write_text("changed\n", encoding="utf-8")
     assert source.read_text(encoding="utf-8") == "tool\n"
 

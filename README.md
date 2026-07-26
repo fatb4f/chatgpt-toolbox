@@ -1,39 +1,35 @@
 # ChatGPT Toolbox
 
-A Python-authoritative builder for repository-specific, self-contained native tool bundles.
+A Python-authoritative builder for repository-specific, offline tool releases.
 
 ```text
-Just recipe
-    ↓
-root UV project + dependency group
-    ↓
-jsonargparse command façade
-    ↓
-frozen repository/tool descriptors
+frozen repository/tool/component descriptors
     ↓
 validated acyclic build graph
     ↓
 content-addressed acquisition pool
     ↓
-content-addressed tool projection pool
+content-addressed build projections
     ↓
-compose one repository prefix
+qualified deterministic component archives
     ↓
-package one release archive
+manifest-bound aggregate tar.zst
+    ↓
+stable-prefix installer
 ```
 
 ## Authority boundary
 
 The builder uses:
 
-- frozen dataclasses for descriptor types;
-- immutable, closed repository and tool registries;
-- constructor and graph invariants;
-- typed operations exposed through `jsonargparse`;
-- SHA-256 and immutable Git/module revisions before transport;
-- deterministic build projections keyed by source, build contract, and dependency projections.
+- frozen dataclasses and closed registries;
+- immutable Git revisions, module versions, and SHA-256 pins;
+- typed build projections, including source-derived Go linker variables;
+- qualification gates before component admission;
+- deterministic `tar.zst` archives with epoch timestamps and numeric ownership;
+- release and component manifests that encode the admitted DAG.
 
-CUE projection, Pydantic generation, and Hypothesis mutation testing remain deferred extensions.
+CUE may later generate or validate descriptor values, but Python remains the execution adapter for acquisition, pooling, building, qualification, and publication.
 
 ## Commands
 
@@ -54,106 +50,86 @@ uv run toolbox clean --repository dotfiles
 uv run toolbox clean-cache
 ```
 
-`inspect` is non-mutating. `build` refuses transport while any digest, source revision, or module version is unresolved.
+`inspect` is non-mutating. `clean` removes only the repository workspace. `clean-cache` explicitly evicts the shared content-addressed pool.
 
-`clean` removes only the repository composition workspace. It deliberately preserves `.toolbox-cache`, allowing immutable downloads, source checkouts, and built tool projections to be reused. `clean-cache` is the explicit eviction operation.
+## Pool and release separation
 
-## Dotfiles bundle
-
-The registered closure is:
+The pool is an internal build accelerator:
 
 ```text
-Python 3.14.3
-Go 1.26.5
-CUE 0.18.0 @ 806821e
- gopls 0.23.0 ┐
-                  ├─ shared golang/tools checkout @ 014f87f
- goimports        ┘
-UV 0.11.32
-Lua 5.5.0
-LuaLS 3.18.2
-go-git v5.19.1
-context-git-hydrator @ pinned dotfiles revision
+.toolbox-cache/
+├── downloads/                  verified immutable archives
+├── sources/                    clean immutable Git checkouts
+├── builds/<target>/            compiler and module caches
+├── projections/<target>/       checksum-bound tool projections
+└── components/<target>/        checksum-bound component archives
 ```
 
-The graph enforces:
+Repository names are excluded from cache keys when the underlying artifact is reusable. Cache hit state never enters release authority, so cold and warm builds remain byte-identical.
+
+The published release is layered:
 
 ```text
-go ─────┬─→ cue
-        ├─→ gopls
-        ├─→ goimports
-        └─→ context-git-hydrator ←─ go-git
-
-lua ───────→ luals
+repos/dotfiles/dist/release/
+├── install.sh
+├── manifest.json
+├── release-lock.json
+├── SHA256SUMS
+├── dotfiles-native-base-linux-amd64.tar.zst
+├── dotfiles-native-base-linux-amd64.tar.zst.sha256
+├── dotfiles-go-programs-linux-amd64.tar.zst
+├── dotfiles-go-programs-linux-amd64.tar.zst.sha256
+├── dotfiles-python-projects-linux-amd64.tar.zst
+├── dotfiles-python-projects-linux-amd64.tar.zst.sha256
+├── dotfiles-repository-source-linux-amd64.tar.zst
+├── dotfiles-repository-source-linux-amd64.tar.zst.sha256
+└── dotfiles-tools-linux-amd64.tar.zst
 ```
 
-CUE, gopls, goimports, and the context hydrator follow the known-good CUEstrap source workflow:
+Only the aggregate is required for installation; component archives remain independently inspectable and reusable release surfaces.
+
+## Dotfiles release graph
+
+```text
+native-base
+├── Python 3.14.3
+├── uv 0.11.32
+├── Go 1.26.5
+├── CUE 0.18.0 @ pinned source revision
+├── Lua 5.5.0
+├── gopls / goimports @ shared x/tools revision
+└── LuaLS 3.18.2
+
+go-programs ──requires──> native-base
+└── context-git-hydrator
+    ├── deterministic source digest
+    ├── BuildHydratorDigest linker injection
+    └── committed-snapshot fixture qualification
+
+repository-source ──requires──> native-base
+└── exact dotfiles checkout admitted only after the pinned CUE suite passes
+
+python-projects ──requires──> native-base + repository-source
+└── pyproject.toml + uv.lock + offline uv closure
+```
+
+CUE, gopls, goimports, and the Git hydrator follow the known-good CUEstrap source-build pattern:
 
 ```bash
 git fetch --depth=1 <exact-commit>
 git checkout --detach FETCH_HEAD
-go build -trimpath -buildvcs=true '-ldflags=-s -w' ...
+go build -trimpath -buildvcs=true '-ldflags=-s -w ...' ...
 ```
 
-CUE 0.18.0 is therefore acquired from commit `806821e40fae070318600a264d311517e596353b`; the nonexistent module query `cuelang.org/go/cmd/cue@v0.18.0` is never used.
-
-## Pooling model
-
-Pool keys do not contain repository names.
-
-```text
-Acquisition key
-    = hash(AcquisitionSpec)
-
-Projection key
-    = hash(ToolSpec + acquired identity + dependency projection keys)
-```
-
-Consequences:
-
-- gopls and goimports share one `golang/tools` checkout;
-- repeated builds do not redownload immutable archives;
-- compiled tools are reused across repository bundles when their full build closure is unchanged;
-- repository bundles remain independent compositions;
-- only the combined repository archive is published—pooled projections are internal cache entries, not release artifacts.
-
-The final lock records deterministic acquisition and projection keys. It does not record whether a cache happened to be warm, so cold and warm builds remain byte-equivalent.
-
-## Build layout
-
-```text
-.toolbox-cache/
-├── downloads/                 # shared immutable archives
-├── sources/                   # shared immutable Git checkouts
-├── builds/<target>/           # external compiler/module caches
-└── projections/<target>/      # verified immutable tool projections
-
-.toolbox-work/
-└── dotfiles-<target>/
-    └── prefix/                 # disposable composed bundle
-
-repos/dotfiles/dist/
-└── dotfiles-<target>.tar.gz    # sole published artifact
-```
-
-Go source builds use the pooled Go toolchain while writing only into the tool's projection:
+## Installation
 
 ```bash
-GOROOT="$COMPOSED_PREFIX/libexec/go"
-GOTOOLCHAIN=local
-GOBIN="$PROJECTION_PREFIX/bin"
-PATH="$GOROOT/bin:$COMPOSED_PREFIX/bin:$PROJECTION_PREFIX/bin:$PATH"
+bash repos/dotfiles/dist/release/install.sh --prefix /tmp/dotfiles
+export PATH=/tmp/dotfiles/current/bin:$PATH
+export GOROOT=/tmp/dotfiles/current/libexec/go
+export GOTOOLCHAIN=local
 ```
 
-## Constructor host
+The installer verifies the outer checksums and aggregate manifest, installs into `versions/<lock-digest>`, materializes the Python project from the bundled offline uv cache, verifies the installed projection, and atomically updates `current`.
 
-The generic adapters require these host-side constructors:
-
-```text
-uv
-git
-make
-C compiler toolchain (for Lua)
-```
-
-Public release assets use pinned HTTPS URLs and SHA-256 verification, so the dotfiles closure no longer requires `gh` for transport.
+No sourced activation script must infer its own pathname.

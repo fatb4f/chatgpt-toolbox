@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Mapping
+import hashlib
 import os
 import shutil
 
@@ -14,16 +16,18 @@ class BuildError(RuntimeError):
     pass
 
 
+@dataclass(frozen=True, slots=True)
+class ResolvedBuild:
+    source_digest: str | None
+    ldflags: tuple[str, ...]
+
+
 def staged_go_environment(
     toolchain_prefix: Path,
     output_prefix: Path,
     cache_root: Path | None = None,
 ) -> dict[str, str]:
-    """Build with the pooled Go toolchain while emitting into one projection.
-
-    The two-argument form retains the original behavior, where the toolchain and
-    output prefixes are the same path.
-    """
+    """Use the pooled Go toolchain while emitting into one isolated projection."""
     if cache_root is None:
         cache_root = output_prefix
         output_prefix = toolchain_prefix
@@ -61,13 +65,63 @@ def _merged_environment(
     return result
 
 
-def go_build_arguments(build: BuildSpec) -> list[str]:
+def _source_digest(tool: ToolSpec, artifact: AcquiredArtifact) -> str | None:
+    specification = tool.build.source_digest
+    if specification is None:
+        return None
+    if artifact.path is None:
+        raise BuildError(f"source digest requires source path for {tool.name}")
+    root = (
+        artifact.path
+        / tool.build.source_subdir
+        / specification.source_subdir
+    ).resolve()
+    if not root.is_dir():
+        raise BuildError(f"source digest root does not exist for {tool.name}: {root}")
+    digest = hashlib.sha256()
+    selected = sorted(
+        (
+            path
+            for path in root.rglob("*")
+            if path.is_file()
+            and (
+                path.suffix in specification.include_suffixes
+                or path.name in specification.include_names
+            )
+        ),
+        key=lambda path: path.relative_to(root).as_posix(),
+    )
+    if not selected:
+        raise BuildError(f"source digest selected no files for {tool.name}")
+    for path in selected:
+        relative = path.relative_to(root).as_posix().encode("utf-8")
+        digest.update(relative)
+        digest.update(b"\0")
+        digest.update(path.read_bytes())
+        digest.update(b"\0")
+    return specification.prefix + digest.hexdigest()
+
+
+def resolve_build(tool: ToolSpec, artifact: AcquiredArtifact) -> ResolvedBuild:
+    source_digest = _source_digest(tool, artifact)
+    ldflags = list(tool.build.ldflags)
+    for variable in tool.build.linker_variables:
+        if variable.value_source == "source-digest":
+            if source_digest is None:
+                raise BuildError(
+                    f"linker variable for {tool.name} has no source digest"
+                )
+            ldflags.extend(("-X", f"{variable.symbol}={source_digest}"))
+    return ResolvedBuild(source_digest=source_digest, ldflags=tuple(ldflags))
+
+
+def go_build_arguments(build: BuildSpec, resolved: ResolvedBuild) -> list[str]:
     arguments: list[str] = []
     if build.trimpath:
         arguments.append("-trimpath")
     arguments.append(f"-buildvcs={'true' if build.build_vcs else 'false'}")
-    if build.ldflags:
-        arguments.append(f"-ldflags={' '.join(build.ldflags)}")
+    if resolved.ldflags:
+        arguments.append(f"-ldflags={' '.join(resolved.ldflags)}")
     return arguments
 
 
@@ -80,16 +134,18 @@ def build_and_stage_tool(
     runner: Runner,
     toolchain_prefix: Path | None = None,
     go_cache_root: Path | None = None,
-) -> None:
+    resolved_build: ResolvedBuild | None = None,
+) -> ResolvedBuild:
     build_root.mkdir(parents=True, exist_ok=True)
     prefix.mkdir(parents=True, exist_ok=True)
     toolchain = toolchain_prefix or prefix
     shared_go_cache = go_cache_root or build_root / "go-cache"
+    resolved = resolved_build or resolve_build(tool, artifact)
 
     match tool.build.kind:
         case BuildKind.NONE:
             if artifact.path is None:
-                return
+                return resolved
             extracted = build_root / "extracted"
             shutil.rmtree(extracted, ignore_errors=True)
             extract_archive(artifact.path, extracted)
@@ -103,7 +159,7 @@ def build_and_stage_tool(
             )
             output = prefix / (tool.build.output or "")
             output.parent.mkdir(parents=True, exist_ok=True)
-            flags = go_build_arguments(tool.build)
+            flags = go_build_arguments(tool.build, resolved)
             if tool.acquisition.kind is AcquisitionKind.GO_MODULE:
                 module = tool.acquisition.module or ""
                 version = tool.acquisition.version or ""
@@ -166,3 +222,4 @@ def build_and_stage_tool(
 
         case _:
             raise AssertionError(f"unhandled build kind: {tool.build.kind}")
+    return resolved
