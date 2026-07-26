@@ -19,11 +19,10 @@ def test_inspect_projects_fully_pinned_layered_release() -> None:
         "repository-source",
     ]
     nodes = {node.name: node for node in plan.nodes}
+    assert "context-git-hydrator" not in nodes
     assert nodes["cue"].acquisition.revision == (
         "806821e40fae070318600a264d311517e596353b"
     )
-    assert nodes["context-git-hydrator"].build.source_digest is not None
-    assert nodes["context-git-hydrator"].build.linker_variables
 
 
 def test_local_go_program_must_match_declared_module_pin(tmp_path: Path) -> None:

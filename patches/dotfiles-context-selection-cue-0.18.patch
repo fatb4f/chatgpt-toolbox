@@ -21,7 +21,7 @@ diff --git a/.codex/context-model/context_selection_service.cue b/.codex/context
  })
  
  #ContextOverlaySelectionEvaluation: close({
-@@ -832,8 +832,8 @@
+@@ -832,6 +832,6 @@
  		}
  		allPaths: [for path, _ in _pathSet {path}]
  	}

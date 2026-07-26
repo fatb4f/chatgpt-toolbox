@@ -24,9 +24,8 @@ SPEC = RepositorySpec(
         "lua",
         "luals",
         "go-git",
-        "context-git-hydrator",
     ),
-    programs=("context-git-hydrator",),
+    programs=(),
     source=AcquisitionSpec(
         kind=AcquisitionKind.GIT_CHECKOUT,
         repository=DOTFILES_SOURCE,
@@ -36,7 +35,7 @@ SPEC = RepositorySpec(
     patches=(
         SourcePatchSpec(
             path="patches/dotfiles-context-selection-cue-0.18.patch",
-            sha256="163f69dfd3474c61a60f6f6c973ed99d06f89793264dcddd96293f0269876969",
+            sha256="08dc527f3d67ccfb7581a6ae87821f5f2aef7f10c2ba4dc0227ae83b35f6b488",
         ),
     ),
 )

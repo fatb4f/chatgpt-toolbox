@@ -101,10 +101,7 @@ native-base
 └── LuaLS 3.18.2
 
 go-programs ──requires──> native-base
-└── context-git-hydrator
-    ├── deterministic source digest
-    ├── BuildHydratorDigest linker injection
-    └── committed-snapshot fixture qualification
+└── intentionally empty; retained as a stable release component
 
 repository-source ──requires──> native-base
 └── exact dotfiles checkout admitted only after the pinned CUE suite passes
@@ -113,7 +110,7 @@ python-projects ──requires──> native-base + repository-source
 └── pyproject.toml + uv.lock + offline uv closure
 ```
 
-CUE, gopls, goimports, and the Git hydrator follow the known-good CUEstrap source-build pattern:
+CUE, gopls, and goimports follow the known-good CUEstrap source-build pattern:
 
 ```bash
 git fetch --depth=1 <exact-commit>
