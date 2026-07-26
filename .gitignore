@@ -6,3 +6,4 @@ __pycache__/
 .tmp/
 repos/*/dist/*
 !repos/*/dist/.gitkeep
+uv.lock
