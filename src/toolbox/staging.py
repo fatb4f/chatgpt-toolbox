@@ -121,12 +121,33 @@ def write_activation(prefix: Path) -> Path:
     activation = prefix / "activate"
     activation.write_text(
         "#!/bin/sh\n"
-        'TOOLBOX_ROOT=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)\n'
+        "_toolbox_source=\n"
+        "if [ -n \"${BASH_VERSION:-}\" ]; then\n"
+        "    eval '_toolbox_source=${BASH_SOURCE[0]}'\n"
+        "elif [ -n \"${ZSH_VERSION:-}\" ]; then\n"
+        "    eval '_toolbox_source=${(%):-%N}'\n"
+        "elif [ -d \"/proc/$$/fd\" ]; then\n"
+        "    for _toolbox_fd in /proc/$$/fd/*; do\n"
+        "        _toolbox_candidate=$(readlink \"$_toolbox_fd\" 2>/dev/null) || continue\n"
+        "        case \"$_toolbox_candidate\" in\n"
+        "            */activate)\n"
+        "                _toolbox_source=$_toolbox_candidate\n"
+        "                break\n"
+        "                ;;\n"
+        "        esac\n"
+        "    done\n"
+        "fi\n"
+        "if [ -z \"$_toolbox_source\" ]; then\n"
+        "    echo \"unable to locate sourced toolbox activation file\" >&2\n"
+        "    return 1 2>/dev/null || exit 1\n"
+        "fi\n"
+        'TOOLBOX_ROOT=$(CDPATH= cd -- "$(dirname -- "$_toolbox_source")" && pwd)\n'
         "export TOOLBOX_ROOT\n"
         'export PATH="$TOOLBOX_ROOT/bin:$PATH"\n'
         'export GOROOT="$TOOLBOX_ROOT/libexec/go"\n'
         "export GOTOOLCHAIN=local\n"
-        'export GOBIN="$TOOLBOX_ROOT/bin"\n',
+        'export GOBIN="$TOOLBOX_ROOT/bin"\n'
+        "unset _toolbox_source _toolbox_fd _toolbox_candidate\n",
         encoding="utf-8",
     )
     activation.chmod(0o755)
