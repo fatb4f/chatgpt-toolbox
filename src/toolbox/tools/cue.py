@@ -1,17 +1,27 @@
-from toolbox.model import AcquisitionKind, AcquisitionSpec, InstallEntry, InstallEntryKind, ToolRole, ToolSpec
+from toolbox.model import (
+    AcquisitionKind,
+    AcquisitionSpec,
+    BuildKind,
+    BuildSpec,
+    ToolRole,
+    ToolSpec,
+)
 
 SPEC = ToolSpec(
     name="cue",
     version="0.18.0",
     target="x86_64-unknown-linux-gnu",
     acquisition=AcquisitionSpec(
-        kind=AcquisitionKind.GITHUB_RELEASE,
-        repository="cue-lang/cue",
-        release="v0.18.0",
-        asset="cue_v0.18.0_linux_amd64.tar.gz",
-        sha256=None,
+        kind=AcquisitionKind.GO_MODULE,
+        module="cuelang.org/go",
+        version="v0.18.0",
     ),
-    install=(InstallEntry("cue", "bin/cue", InstallEntryKind.FILE),),
+    build=BuildSpec(
+        kind=BuildKind.GO_COMMAND,
+        requires=("go",),
+        package="cuelang.org/go/cmd/cue",
+        output="bin/cue",
+    ),
     roles=frozenset({ToolRole.RUNTIME}),
     probes=(("cue", "version"),),
 )

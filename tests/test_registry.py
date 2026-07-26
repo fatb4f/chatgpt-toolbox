@@ -13,7 +13,7 @@ def test_dotfiles_registry_is_closed_and_complete() -> None:
         "lua",
         "luals",
         "go-git",
-        "gitfacts",
+        "context-git-hydrator",
     )
     assert set(repository.tools) <= set(TOOLS)
 
@@ -23,6 +23,7 @@ def test_dotfiles_build_graph_orders_dependencies() -> None:
     positions = {name: index for index, name in enumerate(order)}
     assert positions["go"] < positions["gopls"]
     assert positions["go"] < positions["goimports"]
-    assert positions["go"] < positions["gitfacts"]
-    assert positions["go-git"] < positions["gitfacts"]
+    assert positions["go"] < positions["cue"]
+    assert positions["go"] < positions["context-git-hydrator"]
+    assert positions["go-git"] < positions["context-git-hydrator"]
     assert positions["lua"] < positions["luals"]

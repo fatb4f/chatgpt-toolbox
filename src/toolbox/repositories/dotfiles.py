@@ -1,7 +1,3 @@
-from pathlib import Path
-
-from toolbox.model import RepositorySpec
-
 SPEC = RepositorySpec(
     name="dotfiles",
     root=Path("repos/dotfiles"),
@@ -17,7 +13,7 @@ SPEC = RepositorySpec(
         "lua",
         "luals",
         "go-git",
-        "gitfacts",
+        "context-git-hydrator",
     ),
-    programs=("gitfacts",),
+    programs=("context-git-hydrator",),
 )
