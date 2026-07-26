@@ -8,6 +8,7 @@ import shutil
 import subprocess
 
 from toolbox.acquisition import AcquiredArtifact, Runner, SubprocessRunner, acquire_tool
+from toolbox.builders import go_source_digest
 from toolbox.model import (
     AcquisitionKind,
     BundleResult,
@@ -19,6 +20,7 @@ from toolbox.model import (
 )
 from toolbox.packaging import create_deterministic_archive, write_native_lock
 from toolbox.pool import ensure_tool_projection
+from toolbox.qualification import qualify_programs
 from toolbox.registry import get_repository, selected_tools, topological_tools
 from toolbox.staging import stage_projection, write_activation
 
@@ -162,6 +164,7 @@ def build_repository(
     runner = SubprocessRunner()
     lock_tools: list[dict[str, object]] = []
     projection_keys: dict[str, str] = {}
+    source_digests: dict[str, str] = {}
 
     for tool in tools:
         artifact = acquire_tool(
@@ -172,6 +175,18 @@ def build_repository(
             runner=runner,
         )
         _verify_go_module_edges(tool, artifact, selected)
+        resolved_build: dict[str, object] = {}
+        if tool.build.source_digest_symbol is not None:
+            if artifact.path is None:
+                raise OperationError(
+                    f"{tool.name} source digest requires an acquired source path"
+                )
+            digest = go_source_digest(artifact.path / tool.build.source_subdir)
+            source_digests[tool.name] = digest
+            resolved_build = {
+                "sourceDigest": digest,
+                "sourceDigestSymbol": tool.build.source_digest_symbol,
+            }
         dependency_keys = {
             dependency: projection_keys[dependency] for dependency in tool.requires
         }
@@ -186,19 +201,27 @@ def build_repository(
         )
         stage_projection(projection.root, prefix)
         projection_keys[tool.name] = projection.key
-        lock_tools.append(
-            {
-                "name": tool.name,
-                "version": tool.version,
-                "identity": artifact.identity,
-                "acquisitionCacheKey": artifact.cache_key,
-                "projectionKey": projection.key,
-                "acquisition": to_primitive(tool.acquisition),
-                "build": to_primitive(tool.build),
-            }
-        )
+        lock_entry: dict[str, object] = {
+            "name": tool.name,
+            "version": tool.version,
+            "identity": artifact.identity,
+            "acquisitionCacheKey": artifact.cache_key,
+            "projectionKey": projection.key,
+            "acquisition": to_primitive(tool.acquisition),
+            "build": to_primitive(tool.build),
+        }
+        if resolved_build:
+            lock_entry["resolvedBuild"] = resolved_build
+        lock_tools.append(lock_entry)
 
     _verify_tool_probes(tools, prefix, runner)
+    qualify_programs(
+        descriptor.programs,
+        prefix=prefix,
+        work_root=workspace / "qualification",
+        runner=runner,
+        source_digests=source_digests,
+    )
     write_activation(prefix)
     lockfile = write_native_lock(
         prefix / "native-lock.json",
