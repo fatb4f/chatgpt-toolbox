@@ -1,3 +1,7 @@
+from pathlib import Path
+
+from toolbox.model import RepositorySpec
+
 SPEC = RepositorySpec(
     name="dotfiles",
     root=Path("repos/dotfiles"),
