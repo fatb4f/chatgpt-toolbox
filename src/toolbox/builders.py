@@ -213,7 +213,7 @@ def build_and_stage_tool(
                 [
                     "make",
                     tool.build.install_target or "",
-                    f"INSTALL_TOP={install_prefix}",
+                    f"{tool.build.install_prefix_variable}={install_prefix}",
                 ],
                 cwd=working,
                 env=environment,

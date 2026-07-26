@@ -123,14 +123,24 @@ def test_outer_release_installer_verifies_and_activates_aggregate(tmp_path: Path
         "releaseLock": archive_record(lock_path),
     }
     write_json(release / "manifest.json", manifest)
+    zstd = shutil.which("zstd")
+    assert zstd is not None
+    shutil.copy2(zstd, release / "zstd")
     write_outer_installer(
         release / "install.sh",
         repository="sample",
         archive_name=archive.name,
+        zstd_name="zstd",
     )
     write_release_checksums(
         release,
-        (archive.name, "manifest.json", "release-lock.json", "install.sh"),
+        (
+            archive.name,
+            "manifest.json",
+            "release-lock.json",
+            "install.sh",
+            "zstd",
+        ),
     )
 
     prefix = tmp_path / "prefix"
@@ -141,6 +151,9 @@ def test_outer_release_installer_verifies_and_activates_aggregate(tmp_path: Path
         capture_output=True,
     )
     assert (prefix / "current/bin/tool").is_file()
+    installer = (release / "install.sh").read_text()
+    assert 'zstd_command="$work/$zstd_name"' in installer
+    assert "tar --zstd" not in installer
 
 
 def test_release_verifier_rejects_component_sidecar_tampering(tmp_path: Path) -> None:

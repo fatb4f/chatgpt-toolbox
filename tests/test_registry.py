@@ -14,6 +14,7 @@ def test_dotfiles_registry_is_closed_and_complete() -> None:
         "lua",
         "luals",
         "go-git",
+        "zstd",
     )
     assert "context-git-hydrator" not in repository.tools
     assert "context-git-hydrator" not in repository.programs

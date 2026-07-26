@@ -272,6 +272,8 @@ def verify_release_directory(release_dir: Path) -> None:
         "release-lock.json",
         "install.sh",
     }
+    if (release_dir / "zstd").is_file():
+        expected_outer.add("zstd")
     if None in expected_outer or set(checksums) != expected_outer:
         raise PackagingError("SHA256SUMS does not cover the exact outer release authority")
     for relative, expected in checksums.items():
@@ -569,12 +571,17 @@ echo "export PATH=$prefix/current/bin:\\$PATH"
 '''
 
 
-def _outer_installer_script(repository: str, archive_name: str) -> str:
+def _outer_installer_script(
+    repository: str, archive_name: str, zstd_name: str | None
+) -> str:
     upper = repository.upper().replace("-", "_")
+    bundled_zstd = zstd_name or ""
+    zstd_asset = f' "{zstd_name}"' if zstd_name else ""
     return f'''#!/usr/bin/env bash
 set -euo pipefail
 
 archive_name={archive_name}
+zstd_name={bundled_zstd}
 prefix=${{{upper}_PREFIX:-"${{HOME}}/.local/{repository}"}}
 base_url=${{{upper}_RELEASE_URL:-}}
 source_dir=
@@ -607,9 +614,9 @@ case "$1" in
 esac
 done
 [[ $(uname -s) == Linux && $(uname -m) == x86_64 ]] || {{ echo "this bundle requires Linux x86_64" >&2; exit 1; }}
-for command_name in sha256sum tar zstd; do command -v "$command_name" >/dev/null || {{ echo "required command unavailable: $command_name" >&2; exit 1; }}; done
+for command_name in sha256sum tar; do command -v "$command_name" >/dev/null || {{ echo "required command unavailable: $command_name" >&2; exit 1; }}; done
 work=$(mktemp -d); trap 'rm -rf -- "$work"' EXIT
-assets=("$archive_name" SHA256SUMS manifest.json release-lock.json install.sh)
+assets=("$archive_name" SHA256SUMS manifest.json release-lock.json install.sh{zstd_asset})
 if [[ -n "$source_dir" ]]; then
   for asset in "${{assets[@]}}"; do [[ -f "$source_dir/$asset" ]] || {{ echo "offline asset is missing: $source_dir/$asset" >&2; exit 1; }}; cp "$source_dir/$asset" "$work/$asset"; done
 else
@@ -618,15 +625,22 @@ else
   for asset in "${{assets[@]}}"; do curl --fail --location --proto '=https' --tlsv1.2 "$base_url/$asset" -o "$work/$asset"; done
 fi
 (cd "$work" && sha256sum --check --strict SHA256SUMS)
+if [[ -n "$zstd_name" ]]; then
+  chmod 0755 "$work/$zstd_name"
+  zstd_command="$work/$zstd_name"
+else
+  command -v zstd >/dev/null || {{ echo "required command unavailable: zstd" >&2; exit 1; }}
+  zstd_command=zstd
+fi
 path_is_safe() {{
  local value=$1 depth=0 part
  [[ -n "$value" && "$value" != /* && "$value" != *$'\n'* && "$value" != *$'\r'* && "$value" != *$'\t'* ]] || return 1
  IFS='/' read -r -a parts <<< "$value"
  for part in "${{parts[@]}}"; do case "$part" in ''|.) ;; ..) ((depth > 0)) || return 1; ((depth -= 1)) ;; *) ((depth += 1)) ;; esac; done
 }}
-while IFS= read -r member; do path_is_safe "$member" || {{ echo "unsafe archive member: $member" >&2; exit 1; }}; done < <(tar --zstd -tf "$work/$archive_name")
+while IFS= read -r member; do path_is_safe "$member" || {{ echo "unsafe archive member: $member" >&2; exit 1; }}; done < <("$zstd_command" -dc "$work/$archive_name" | tar -tf -)
 mkdir -p "$work/extracted"
-tar --zstd -xf "$work/$archive_name" -C "$work/extracted"
+"$zstd_command" -dc "$work/$archive_name" | tar -xf - -C "$work/extracted"
 "$work/extracted/bin/python3" "$work/extracted/share/toolbox/verify_bundle.py" archive "$work/extracted"
 "$work/extracted/bin/python3" "$work/extracted/share/toolbox/verify_bundle.py" release "$work/extracted" "$work/manifest.json" "$work/$archive_name" "$work/release-lock.json"
 if $print_manifest; then cat "$work/manifest.json"; exit 0; fi
@@ -675,9 +689,16 @@ def write_bundle_support(
 
 
 def write_outer_installer(
-    path: Path, *, repository: str, archive_name: str
+    path: Path,
+    *,
+    repository: str,
+    archive_name: str,
+    zstd_name: str | None = None,
 ) -> Path:
-    path.write_text(_outer_installer_script(repository, archive_name), encoding="utf-8")
+    path.write_text(
+        _outer_installer_script(repository, archive_name, zstd_name),
+        encoding="utf-8",
+    )
     path.chmod(0o755)
     return path
 

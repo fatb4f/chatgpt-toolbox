@@ -11,6 +11,7 @@ _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 _NAME_RE = re.compile(r"^[a-z][a-z0-9-]*$")
 _TARGET_RE = re.compile(r"^[A-Za-z0-9_.+-]+(?:-[A-Za-z0-9_.+-]+)+$")
 _GO_SYMBOL_RE = re.compile(r"^[A-Za-z0-9_./-]+\.[A-Za-z_][A-Za-z0-9_]*$")
+_MAKE_VARIABLE_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
 class DescriptorError(ValueError):
@@ -179,6 +180,7 @@ class BuildSpec:
     linker_variables: tuple[LinkerVariableSpec, ...] = ()
     make_target: str | None = None
     install_target: str | None = None
+    install_prefix_variable: str = "INSTALL_TOP"
     environment: Mapping[str, str] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
@@ -198,6 +200,8 @@ class BuildSpec:
             raise DescriptorError(
                 "linker variables require a declared source digest projection"
             )
+        if not _MAKE_VARIABLE_RE.fullmatch(self.install_prefix_variable):
+            raise DescriptorError("make install prefix variable must be a variable name")
 
         match self.kind:
             case BuildKind.NONE:

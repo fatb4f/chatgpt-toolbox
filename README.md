@@ -75,6 +75,7 @@ repos/dotfiles/dist/release/
 ├── manifest.json
 ├── release-lock.json
 ├── SHA256SUMS
+├── zstd
 ├── dotfiles-native-base-linux-amd64.tar.zst
 ├── dotfiles-native-base-linux-amd64.tar.zst.sha256
 ├── dotfiles-go-programs-linux-amd64.tar.zst
@@ -86,7 +87,9 @@ repos/dotfiles/dist/release/
 └── dotfiles-tools-linux-amd64.tar.zst
 ```
 
-Only the aggregate is required for installation; component archives remain independently inspectable and reusable release surfaces.
+The installer uses the adjacent checksummed `zstd` executable to unpack the
+aggregate; component archives remain independently inspectable and reusable
+release surfaces.
 
 ## Dotfiles release graph
 
@@ -98,7 +101,8 @@ native-base
 ├── CUE 0.18.0 @ pinned source revision
 ├── Lua 5.5.0
 ├── gopls / goimports @ shared x/tools revision
-└── LuaLS 3.18.2
+├── LuaLS 3.18.2
+└── zstd 1.5.7
 
 go-programs ──requires──> native-base
 └── intentionally empty; retained as a stable release component

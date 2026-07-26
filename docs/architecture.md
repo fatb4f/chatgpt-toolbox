@@ -71,6 +71,7 @@ release/
 ├── manifest.json
 ├── release-lock.json
 ├── SHA256SUMS
+├── zstd
 ├── <component>.tar.zst
 ├── <component>.tar.zst.sha256
 └── <repository>-tools-linux-amd64.tar.zst
@@ -82,7 +83,9 @@ The aggregate archive is a deterministic merge of admitted components. Conflicti
 
 ## Installation
 
-The outer installer verifies the release authority and safely extracts the aggregate. The embedded installer then:
+The outer installer verifies the release authority and uses the checksummed
+adjacent `zstd` executable to safely extract the aggregate. The embedded
+installer then:
 
 1. verifies the archive projection;
 2. selects `versions/<lock-digest>`;

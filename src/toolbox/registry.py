@@ -16,6 +16,7 @@ from toolbox.tools.lua import SPEC as LUA
 from toolbox.tools.luals import SPEC as LUALS
 from toolbox.tools.python import SPEC as PYTHON
 from toolbox.tools.uv import SPEC as UV
+from toolbox.tools.zstd import SPEC as ZSTD
 
 
 def _closed_registry(items: tuple[ToolSpec, ...]) -> Mapping[str, ToolSpec]:
@@ -28,7 +29,19 @@ def _closed_registry(items: tuple[ToolSpec, ...]) -> Mapping[str, ToolSpec]:
 
 
 TOOLS: Mapping[str, ToolSpec] = _closed_registry(
-    (PYTHON, GO, CUE, GOPLS, GOIMPORTS, UV, LUA, LUALS, GO_GIT, CONTEXT_GIT_HYDRATOR)
+    (
+        PYTHON,
+        GO,
+        CUE,
+        GOPLS,
+        GOIMPORTS,
+        UV,
+        LUA,
+        LUALS,
+        GO_GIT,
+        ZSTD,
+        CONTEXT_GIT_HYDRATOR,
+    )
 )
 REPOSITORIES: Mapping[str, RepositorySpec] = MappingProxyType({DOTFILES.name: DOTFILES})
 

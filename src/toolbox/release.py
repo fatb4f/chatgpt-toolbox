@@ -534,19 +534,33 @@ def publish_release(
         "archive": archive_record(aggregate),
         "releaseLock": archive_record(lock_path),
         "hostRequirements": {
-            "install": ["bash", "sha256sum", "tar", "zstd"],
+            "install": ["bash", "sha256sum", "tar"],
             "build": ["git", "make", "cc", "jq", "zstd"],
         },
     }
     manifest = write_json(release_dir / "manifest.json", manifest_document)
+    zstd_name: str | None = None
+    if "zstd" in projections:
+        zstd_source = projections["zstd"].root / "bin" / "zstd"
+        if not zstd_source.is_file():
+            raise ReleaseError("zstd projection has no bin/zstd executable")
+        zstd_name = "zstd"
+        shutil.copy2(zstd_source, release_dir / zstd_name)
     installer = write_outer_installer(
         release_dir / "install.sh",
         repository=repository.name,
         archive_name=aggregate.name,
+        zstd_name=zstd_name,
     )
     write_release_checksums(
         release_dir,
-        (aggregate.name, manifest.name, lock_path.name, installer.name),
+        (
+            aggregate.name,
+            manifest.name,
+            lock_path.name,
+            installer.name,
+            *((zstd_name,) if zstd_name else ()),
+        ),
     )
     verify_release_directory(release_dir)
     return aggregate, manifest, lock_path, tuple(component_paths)

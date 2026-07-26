@@ -24,6 +24,7 @@ SPEC = RepositorySpec(
         "lua",
         "luals",
         "go-git",
+        "zstd",
     ),
     programs=(),
     source=AcquisitionSpec(

@@ -1,6 +1,7 @@
 from pathlib import Path
 import hashlib
 import subprocess
+import tarfile
 
 from toolbox.acquisition import AcquiredArtifact
 from toolbox.builders import build_and_stage_tool, resolve_build, staged_go_environment
@@ -48,6 +49,39 @@ def test_staged_go_environment_forces_pooled_compiler_and_external_cache(
         str((output / "bin").resolve()),
     ]
     assert environment["GOCACHE"] == str((cache / "build").resolve())
+
+
+def test_make_build_uses_declared_install_prefix_variable(tmp_path: Path) -> None:
+    source = tmp_path / "source"
+    source.mkdir()
+    archive = tmp_path / "source.tar.gz"
+    with tarfile.open(archive, "w:gz") as stream:
+        stream.add(source, arcname="source")
+    tool = ToolSpec(
+        name="example",
+        version="1",
+        target=TARGET,
+        acquisition=AcquisitionSpec(
+            kind=AcquisitionKind.LOCAL_SOURCE,
+            path="source",
+        ),
+        build=BuildSpec(
+            kind=BuildKind.MAKE_COMMAND,
+            make_target="all",
+            install_target="install",
+            install_prefix_variable="PREFIX",
+        ),
+    )
+    artifact = AcquiredArtifact("example", archive, "source", "source-key")
+    runner = RecordingRunner()
+    build_and_stage_tool(
+        tool,
+        artifact,
+        prefix=tmp_path / "projection",
+        build_root=tmp_path / "build",
+        runner=runner,
+    )
+    assert runner.calls[1][0][-1] == f"PREFIX={(tmp_path / 'projection').resolve()}"
 
 
 def test_source_digest_and_linker_projection_match_hydrator_contract(
