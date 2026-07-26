@@ -1,6 +1,8 @@
 name: Apply layered release refactor
 
 on:
+  pull_request:
+    types: [opened, reopened, synchronize]
   push:
     branches:
       - agent/layered-release
@@ -10,15 +12,19 @@ permissions:
 
 jobs:
   apply:
-    if: github.actor != 'github-actions[bot]'
+    if: >-
+      github.actor != 'github-actions[bot]' &&
+      ((github.event_name == 'pull_request' && github.head_ref == 'agent/layered-release') ||
+       (github.event_name == 'push' && github.ref_name == 'agent/layered-release'))
     runs-on: ubuntu-latest
     steps:
       - name: Apply reviewed source payload
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TARGET_BRANCH: ${{ github.head_ref || github.ref_name }}
         run: |
           set -euo pipefail
-          git clone --quiet --branch "$GITHUB_REF_NAME" \
+          git clone --quiet --branch "$TARGET_BRANCH" \
             "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" repository
           cd repository
           cat .agent-payload/part* > /tmp/payload.b64
@@ -46,4 +52,4 @@ jobs:
           git add -A
           git diff --cached --check
           git commit -m "Generalize layered repository releases"
-          git push origin HEAD:"$GITHUB_REF_NAME"
+          git push origin HEAD:"$TARGET_BRANCH"
