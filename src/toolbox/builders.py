@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Mapping
+import hashlib
 import os
 import shutil
 
@@ -61,13 +62,45 @@ def _merged_environment(
     return result
 
 
-def go_build_arguments(build: BuildSpec) -> list[str]:
+def go_source_digest(source_root: Path) -> str:
+    """Hash the Go source authority exactly as the hydrator qualification does."""
+    paths = sorted(
+        (
+            path
+            for path in source_root.rglob("*")
+            if path.is_file()
+            and (path.suffix == ".go" or path.name in {"go.mod", "go.sum"})
+        ),
+        key=lambda path: path.relative_to(source_root).as_posix(),
+    )
+    if not paths:
+        raise BuildError(f"Go source digest has no admitted files under {source_root}")
+    digest = hashlib.sha256()
+    for path in paths:
+        relative = path.relative_to(source_root).as_posix().encode("utf-8")
+        digest.update(relative)
+        digest.update(b"\0")
+        digest.update(path.read_bytes())
+        digest.update(b"\0")
+    return "sha256:" + digest.hexdigest()
+
+
+def go_build_arguments(
+    build: BuildSpec, *, source_root: Path | None = None
+) -> list[str]:
     arguments: list[str] = []
     if build.trimpath:
         arguments.append("-trimpath")
     arguments.append(f"-buildvcs={'true' if build.build_vcs else 'false'}")
-    if build.ldflags:
-        arguments.append(f"-ldflags={' '.join(build.ldflags)}")
+    ldflags = list(build.ldflags)
+    if build.source_digest_symbol is not None:
+        if source_root is None:
+            raise BuildError("source digest injection requires a Go source root")
+        ldflags.append(
+            f"-X {build.source_digest_symbol}={go_source_digest(source_root)}"
+        )
+    if ldflags:
+        arguments.append(f"-ldflags={' '.join(ldflags)}")
     return arguments
 
 
@@ -103,8 +136,8 @@ def build_and_stage_tool(
             )
             output = prefix / (tool.build.output or "")
             output.parent.mkdir(parents=True, exist_ok=True)
-            flags = go_build_arguments(tool.build)
             if tool.acquisition.kind is AcquisitionKind.GO_MODULE:
+                flags = go_build_arguments(tool.build)
                 module = tool.acquisition.module or ""
                 version = tool.acquisition.version or ""
                 package = tool.build.package or module
@@ -126,6 +159,7 @@ def build_and_stage_tool(
                 if artifact.path is None:
                     raise BuildError(f"Go source path missing for {tool.name}")
                 source = artifact.path / tool.build.source_subdir
+                flags = go_build_arguments(tool.build, source_root=source)
                 runner.run(
                     [
                         "go",
