@@ -17,7 +17,9 @@ class BuildError(RuntimeError):
 def staged_go_environment(prefix: Path, cache_root: Path) -> dict[str, str]:
     """Build a Go environment whose mutable state is outside the packaged prefix."""
     goroot = prefix / "libexec" / "go"
-    path = os.pathsep.join((str(goroot / "bin"), str(prefix / "bin"), os.environ.get("PATH", "")))
+    path = os.pathsep.join(
+        (str(goroot / "bin"), str(prefix / "bin"), os.environ.get("PATH", ""))
+    )
     gopath = cache_root / "gopath"
     return {
         **os.environ,
@@ -32,7 +34,9 @@ def staged_go_environment(prefix: Path, cache_root: Path) -> dict[str, str]:
     }
 
 
-def _merged_environment(base: Mapping[str, str], overlay: Mapping[str, str]) -> dict[str, str]:
+def _merged_environment(
+    base: Mapping[str, str], overlay: Mapping[str, str]
+) -> dict[str, str]:
     result = dict(base)
     result.update(overlay)
     return result
@@ -60,7 +64,10 @@ def build_and_stage_tool(
             stage_links(prefix, tool.links)
 
         case BuildKind.GO_COMMAND:
-            environment = _merged_environment(staged_go_environment(prefix, build_root / "go-cache"), tool.build.environment)
+            environment = _merged_environment(
+                staged_go_environment(prefix, build_root / "go-cache"),
+                tool.build.environment,
+            )
             output = prefix / (tool.build.output or "")
             output.parent.mkdir(parents=True, exist_ok=True)
             if tool.acquisition.kind is AcquisitionKind.GO_MODULE:
@@ -72,8 +79,12 @@ def build_and_stage_tool(
                 elif package.startswith(module + "/"):
                     install_target = f"{package}@{version}"
                 else:
-                    raise BuildError(f"Go package {package!r} is outside module {module!r}")
-                runner.run(["go", "install", "-trimpath", install_target], env=environment)
+                    raise BuildError(
+                        f"Go package {package!r} is outside module {module!r}"
+                    )
+                runner.run(
+                    ["go", "install", "-trimpath", install_target], env=environment
+                )
                 produced = prefix / "bin" / Path(package).name
                 if produced != output:
                     if not produced.exists():
@@ -107,13 +118,17 @@ def build_and_stage_tool(
             children = [path for path in source.iterdir() if path.is_dir()]
             working = children[0] if len(children) == 1 else source
             environment = _merged_environment(os.environ, tool.build.environment)
-            runner.run(["make", tool.build.make_target or ""], cwd=working, env=environment)
+            install_prefix = prefix.resolve()
             runner.run(
-                ["make", tool.build.install_target or "", f"INSTALL_TOP={prefix}"],
+                ["make", tool.build.make_target or ""], cwd=working, env=environment
+            )
+            runner.run(
+                [
+                    "make",
+                    tool.build.install_target or "",
+                    f"INSTALL_TOP={install_prefix}",
+                ],
                 cwd=working,
                 env=environment,
             )
             stage_links(prefix, tool.links)
-
-        case _:
-            raise AssertionError(f"unhandled build kind: {tool.build.kind}")
