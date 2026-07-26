@@ -7,7 +7,13 @@ import re
 import shutil
 import subprocess
 
-from toolbox.acquisition import AcquiredArtifact, Runner, SubprocessRunner, acquire_tool
+from toolbox.acquisition import (
+    AcquiredArtifact,
+    Runner,
+    SubprocessRunner,
+    acquire,
+    acquire_tool,
+)
 from toolbox.model import (
     AcquisitionKind,
     BundleResult,
@@ -15,12 +21,16 @@ from toolbox.model import (
     RepositoryPlan,
     ToolRole,
     ToolSpec,
-    to_primitive,
 )
-from toolbox.packaging import create_deterministic_archive, write_native_lock
-from toolbox.pool import ensure_tool_projection
+from toolbox.pool import ToolProjection, ensure_tool_projection
 from toolbox.registry import get_repository, selected_tools, topological_tools
-from toolbox.staging import stage_projection, write_activation
+from toolbox.release import build_components, publish_release
+from toolbox.source import (
+    SourceProjectionError,
+    patch_identity,
+    prepare_repository_source,
+)
+from toolbox.staging import stage_projection
 
 
 class OperationError(RuntimeError):
@@ -106,6 +116,14 @@ def inspect_repository(
         for tool in tools
     )
     defects_list = [defect for tool in tools for defect in tool.lock_defects]
+    if descriptor.source is not None:
+        defects_list.extend(
+            f"repository source: {defect}" for defect in descriptor.source.lock_defects
+        )
+    try:
+        patch_identity(descriptor, toolbox_root)
+    except SourceProjectionError as error:
+        defects_list.append(str(error))
     for tool in tools:
         if tool.acquisition.kind is AcquisitionKind.LOCAL_SOURCE:
             source = toolbox_root / (tool.acquisition.path or "")
@@ -118,7 +136,8 @@ def inspect_repository(
     output = (
         toolbox_root
         / descriptor.dist_dir
-        / f"{descriptor.name}-{resolved_target}.tar.gz"
+        / "release"
+        / f"{descriptor.name}-tools-linux-amd64.tar.zst"
     )
     return RepositoryPlan(
         repository=descriptor.name,
@@ -126,6 +145,7 @@ def inspect_repository(
         python_group=descriptor.python_group,
         output=output.as_posix(),
         nodes=nodes,
+        components=descriptor.components,
         lock_defects=defects,
     )
 
@@ -155,13 +175,16 @@ def build_repository(
     downloads = pool / "downloads"
     sources = pool / "sources"
     builds = pool / "builds" / plan.target
-    projections = pool / "projections" / plan.target
-    prefix = workspace / "prefix"
-    shutil.rmtree(prefix, ignore_errors=True)
-    prefix.mkdir(parents=True)
+    projections_root = pool / "projections" / plan.target
+    components_root = pool / "components" / plan.target
+    composed_prefix = workspace / "composition"
+    aggregate_root = workspace / "aggregate"
+    release_dir = toolbox_root / descriptor.dist_dir / "release"
+    shutil.rmtree(composed_prefix, ignore_errors=True)
+    composed_prefix.mkdir(parents=True)
     runner = SubprocessRunner()
-    lock_tools: list[dict[str, object]] = []
-    projection_keys: dict[str, str] = {}
+    artifacts: dict[str, AcquiredArtifact] = {}
+    projections: dict[str, ToolProjection] = {}
 
     for tool in tools:
         artifact = acquire_tool(
@@ -173,51 +196,69 @@ def build_repository(
         )
         _verify_go_module_edges(tool, artifact, selected)
         dependency_keys = {
-            dependency: projection_keys[dependency] for dependency in tool.requires
+            dependency: projections[dependency].key for dependency in tool.requires
         }
         projection = ensure_tool_projection(
             tool,
             artifact,
             dependency_keys=dependency_keys,
-            projections_root=projections,
+            projections_root=projections_root,
             builds_root=builds,
-            toolchain_prefix=prefix,
+            toolchain_prefix=composed_prefix,
             runner=runner,
         )
-        stage_projection(projection.root, prefix)
-        projection_keys[tool.name] = projection.key
-        lock_tools.append(
-            {
-                "name": tool.name,
-                "version": tool.version,
-                "identity": artifact.identity,
-                "acquisitionCacheKey": artifact.cache_key,
-                "projectionKey": projection.key,
-                "acquisition": to_primitive(tool.acquisition),
-                "build": to_primitive(tool.build),
-            }
-        )
+        stage_projection(projection.root, composed_prefix)
+        artifacts[tool.name] = artifact
+        projections[tool.name] = projection
 
-    _verify_tool_probes(tools, prefix, runner)
-    write_activation(prefix)
-    lockfile = write_native_lock(
-        prefix / "native-lock.json",
-        {
-            "schema": "toolbox.native-lock.v1",
-            "repository": descriptor.name,
-            "target": plan.target,
-            "tools": lock_tools,
-        },
+    _verify_tool_probes(tools, composed_prefix, runner)
+    if descriptor.source is None:
+        raise OperationError("repository source authority is missing")
+    repository_artifact = acquire(
+        f"repository-{descriptor.name}",
+        descriptor.source,
+        downloads=downloads,
+        sources=sources,
+        toolbox_root=toolbox_root,
+        runner=runner,
     )
-    root_name = f"{descriptor.name}-{plan.target}"
-    archive = toolbox_root / descriptor.dist_dir / f"{root_name}.tar.gz"
-    create_deterministic_archive(prefix, archive, root_name)
+    repository_artifact = prepare_repository_source(
+        descriptor,
+        repository_artifact,
+        toolbox_root=toolbox_root,
+        destination=workspace / "repository-source-projection",
+        runner=runner,
+    )
+    components = build_components(
+        repository=descriptor,
+        tools=tools,
+        projections=projections,
+        artifacts=artifacts,
+        repository_artifact=repository_artifact,
+        composed_prefix=composed_prefix,
+        components_root=components_root,
+        work_root=workspace,
+        runner=runner,
+    )
+    archive, manifest, lockfile, component_paths = publish_release(
+        repository=descriptor,
+        tools=tools,
+        artifacts=artifacts,
+        projections=projections,
+        repository_artifact=repository_artifact,
+        components=components,
+        release_dir=release_dir,
+        aggregate_root=aggregate_root,
+    )
     return BundleResult(
         repository=descriptor.name,
         target=plan.target,
-        prefix=prefix.as_posix(),
+        release_dir=release_dir.as_posix(),
         archive=archive.as_posix(),
+        manifest=manifest.as_posix(),
         lockfile=lockfile.as_posix(),
+        components=tuple(path.as_posix() for path in component_paths),
+        prefix=aggregate_root.as_posix(),
     )
 
 

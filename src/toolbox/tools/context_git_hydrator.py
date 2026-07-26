@@ -3,11 +3,18 @@ from toolbox.model import (
     AcquisitionSpec,
     BuildKind,
     BuildSpec,
+    LinkerVariableSpec,
+    SourceDigestSpec,
     ToolRole,
     ToolSpec,
 )
 
 DOTFILES_REVISION = "de858a831d219cae1abcd721ea11cc4779ab6a9a"
+DOTFILES_SOURCE = "https://github.com/fatb4f/dotfiles.git"
+HYDRATOR_SYMBOL = (
+    "github.com/fatb4f/dotfiles/.codex/context-hydrators/git/"
+    "internal/hydrator.BuildHydratorDigest"
+)
 
 SPEC = ToolSpec(
     name="context-git-hydrator",
@@ -15,7 +22,7 @@ SPEC = ToolSpec(
     target="x86_64-unknown-linux-gnu",
     acquisition=AcquisitionSpec(
         kind=AcquisitionKind.GIT_CHECKOUT,
-        repository="https://github.com/fatb4f/dotfiles.git",
+        repository=DOTFILES_SOURCE,
         revision=DOTFILES_REVISION,
     ),
     build=BuildSpec(
@@ -26,6 +33,8 @@ SPEC = ToolSpec(
         output="bin/context-git-hydrator",
         build_vcs=True,
         ldflags=("-s", "-w"),
+        source_digest=SourceDigestSpec(),
+        linker_variables=(LinkerVariableSpec(HYDRATOR_SYMBOL),),
     ),
     roles=frozenset({ToolRole.RUNTIME, ToolRole.PROGRAM}),
     probes=(),

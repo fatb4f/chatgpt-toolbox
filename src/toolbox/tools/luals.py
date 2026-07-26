@@ -1,12 +1,4 @@
-from toolbox.model import (
-    AcquisitionKind,
-    AcquisitionSpec,
-    InstallEntry,
-    InstallEntryKind,
-    LinkSpec,
-    ToolRole,
-    ToolSpec,
-)
+from toolbox.model import AcquisitionKind, AcquisitionSpec, InstallEntry, InstallEntryKind, LinkSpec, ToolRole, ToolSpec
 
 SPEC = ToolSpec(
     name="luals",
@@ -20,17 +12,8 @@ SPEC = ToolSpec(
         ),
         sha256="ca71415dd19f19e30aaa35a4915aefca9fdb5fec31b98331cc3d77f778d539c5",
     ),
-    install=(
-        InstallEntry(
-            ".", "libexec/lua-language-server", InstallEntryKind.TREE
-        ),
-    ),
-    links=(
-        LinkSpec(
-            "bin/lua-language-server",
-            "../libexec/lua-language-server/bin/lua-language-server",
-        ),
-    ),
+    install=(InstallEntry(".", "libexec/lua-language-server", InstallEntryKind.TREE),),
+    links=(LinkSpec("bin/lua-language-server", "../libexec/lua-language-server/bin/lua-language-server"),),
     roles=frozenset({ToolRole.RUNTIME}),
     dependencies=("lua",),
     probes=(("lua-language-server", "--version"),),

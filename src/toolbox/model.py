@@ -10,6 +10,7 @@ import re
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 _NAME_RE = re.compile(r"^[a-z][a-z0-9-]*$")
 _TARGET_RE = re.compile(r"^[A-Za-z0-9_.+-]+(?:-[A-Za-z0-9_.+-]+)+$")
+_GO_SYMBOL_RE = re.compile(r"^[A-Za-z0-9_./-]+\.[A-Za-z_][A-Za-z0-9_]*$")
 
 
 class DescriptorError(ValueError):
@@ -41,6 +42,13 @@ class ToolRole(StrEnum):
     RUNTIME = "runtime"
     MODULE = "module"
     PROGRAM = "program"
+
+
+class ComponentKind(StrEnum):
+    NATIVE_BASE = "native-base"
+    GO_PROGRAMS = "go-programs"
+    PYTHON_PROJECTS = "python-projects"
+    REPOSITORY_SOURCE = "repository-source"
 
 
 def _require_nonempty(label: str, value: str | None) -> str:
@@ -127,6 +135,37 @@ class AcquisitionSpec:
 
 
 @dataclass(frozen=True, slots=True)
+class SourceDigestSpec:
+    source_subdir: str = "."
+    include_suffixes: tuple[str, ...] = (".go",)
+    include_names: tuple[str, ...] = ("go.mod", "go.sum")
+    prefix: str = "sha256:"
+
+    def __post_init__(self) -> None:
+        _validate_relative_posix("source digest subdirectory", self.source_subdir)
+        if not self.include_suffixes and not self.include_names:
+            raise DescriptorError("source digest must include at least one file class")
+        if any(not suffix.startswith(".") for suffix in self.include_suffixes):
+            raise DescriptorError("source digest suffixes must begin with '.'")
+        if any("/" in name or not name for name in self.include_names):
+            raise DescriptorError("source digest names must be non-empty basenames")
+        if not self.prefix or "\x00" in self.prefix or "\n" in self.prefix:
+            raise DescriptorError("source digest prefix must be a safe non-empty string")
+
+
+@dataclass(frozen=True, slots=True)
+class LinkerVariableSpec:
+    symbol: str
+    value_source: str = "source-digest"
+
+    def __post_init__(self) -> None:
+        if not _GO_SYMBOL_RE.fullmatch(self.symbol):
+            raise DescriptorError(f"invalid Go linker variable symbol: {self.symbol!r}")
+        if self.value_source != "source-digest":
+            raise DescriptorError("only source-digest linker values are supported")
+
+
+@dataclass(frozen=True, slots=True)
 class BuildSpec:
     kind: BuildKind = BuildKind.NONE
     requires: tuple[str, ...] = ()
@@ -136,6 +175,8 @@ class BuildSpec:
     trimpath: bool = True
     build_vcs: bool = False
     ldflags: tuple[str, ...] = ()
+    source_digest: SourceDigestSpec | None = None
+    linker_variables: tuple[LinkerVariableSpec, ...] = ()
     make_target: str | None = None
     install_target: str | None = None
     environment: Mapping[str, str] = field(default_factory=dict)
@@ -149,8 +190,14 @@ class BuildSpec:
                 )
         for flag in self.ldflags:
             if not flag or "\x00" in flag or "\n" in flag or "\r" in flag:
-                raise DescriptorError("Go linker flags must be non-empty single-line values")
+                raise DescriptorError(
+                    "Go linker flags must be non-empty single-line values"
+                )
         _validate_relative_posix("source_subdir", self.source_subdir)
+        if self.linker_variables and self.source_digest is None:
+            raise DescriptorError(
+                "linker variables require a declared source digest projection"
+            )
 
         match self.kind:
             case BuildKind.NONE:
@@ -161,6 +208,8 @@ class BuildSpec:
                     or self.install_target
                     or self.build_vcs
                     or self.ldflags
+                    or self.source_digest
+                    or self.linker_variables
                 ):
                     raise DescriptorError(
                         "no-build specifications cannot declare build commands"
@@ -170,9 +219,14 @@ class BuildSpec:
                 output = _require_nonempty("Go output", self.output)
                 _validate_relative_posix("Go output", output, allow_dot=False)
             case BuildKind.MAKE_COMMAND:
-                if self.build_vcs or self.ldflags:
+                if (
+                    self.build_vcs
+                    or self.ldflags
+                    or self.source_digest
+                    or self.linker_variables
+                ):
                     raise DescriptorError(
-                        "make-command specifications cannot declare Go build flags"
+                        "make-command specifications cannot declare Go build projections"
                     )
                 _require_nonempty("make target", self.make_target)
                 _require_nonempty("make install target", self.install_target)
@@ -242,6 +296,73 @@ class ToolSpec:
 
 
 @dataclass(frozen=True, slots=True)
+class SourcePatchSpec:
+    path: str
+    sha256: str
+
+    def __post_init__(self) -> None:
+        _validate_relative_posix("source patch path", self.path, allow_dot=False)
+        if not _SHA256_RE.fullmatch(self.sha256):
+            raise DescriptorError(
+                "source patch sha256 must contain exactly 64 lowercase hexadecimal characters"
+            )
+
+
+@dataclass(frozen=True, slots=True)
+class PythonProjectSpec:
+    project_path: str = "."
+    lock_path: str = "uv.lock"
+    groups: tuple[str, ...] = ()
+    environment_path: str = "share/dotfiles/python/venv"
+    cache_path: str = "share/dotfiles/python/uv-cache"
+
+    def __post_init__(self) -> None:
+        _validate_relative_posix("Python project path", self.project_path)
+        _validate_relative_posix("Python lock path", self.lock_path, allow_dot=False)
+        _validate_relative_posix(
+            "Python environment path", self.environment_path, allow_dot=False
+        )
+        _validate_relative_posix("uv cache path", self.cache_path, allow_dot=False)
+        for group in self.groups:
+            if not _NAME_RE.fullmatch(group):
+                raise DescriptorError(f"invalid Python dependency group: {group!r}")
+
+
+@dataclass(frozen=True, slots=True)
+class ComponentSpec:
+    name: str
+    kind: ComponentKind
+    requires: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        if not _NAME_RE.fullmatch(self.name):
+            raise DescriptorError(f"invalid component name: {self.name!r}")
+        for dependency in self.requires:
+            if not _NAME_RE.fullmatch(dependency):
+                raise DescriptorError(
+                    f"invalid component dependency name: {dependency!r}"
+                )
+
+
+DEFAULT_COMPONENTS = (
+    ComponentSpec("native-base", ComponentKind.NATIVE_BASE),
+    ComponentSpec(
+        "go-programs", ComponentKind.GO_PROGRAMS, requires=("native-base",)
+    ),
+    ComponentSpec(
+        "python-projects",
+        ComponentKind.PYTHON_PROJECTS,
+        requires=("native-base", "repository-source"),
+    ),
+    ComponentSpec(
+        "repository-source",
+        ComponentKind.REPOSITORY_SOURCE,
+        requires=("native-base",),
+    ),
+)
+
+
+@dataclass(frozen=True, slots=True)
 class RepositorySpec:
     name: str
     root: Path
@@ -249,6 +370,10 @@ class RepositorySpec:
     python_group: str
     tools: tuple[str, ...]
     programs: tuple[str, ...] = ()
+    source: AcquisitionSpec | None = None
+    python_project: PythonProjectSpec | None = None
+    patches: tuple[SourcePatchSpec, ...] = ()
+    components: tuple[ComponentSpec, ...] = DEFAULT_COMPONENTS
 
     def __post_init__(self) -> None:
         if not _NAME_RE.fullmatch(self.name):
@@ -265,6 +390,19 @@ class RepositorySpec:
                 raise DescriptorError(
                     f"invalid selected tool/program name: {name!r}"
                 )
+        component_names = {component.name for component in self.components}
+        if len(component_names) != len(self.components):
+            raise DescriptorError("repository component names must be unique")
+        for component in self.components:
+            missing = set(component.requires) - component_names
+            if missing:
+                raise DescriptorError(
+                    f"component {component.name} has unknown dependencies: {sorted(missing)}"
+                )
+        if self.source is None:
+            raise DescriptorError("repository source authority must be declared")
+        if self.python_project is None:
+            raise DescriptorError("repository Python project authority must be declared")
 
     @property
     def dist_dir(self) -> Path:
@@ -289,6 +427,7 @@ class RepositoryPlan:
     python_group: str
     output: str
     nodes: tuple[PlanNode, ...]
+    components: tuple[ComponentSpec, ...]
     lock_defects: tuple[str, ...]
 
     @property
@@ -300,9 +439,12 @@ class RepositoryPlan:
 class BundleResult:
     repository: str
     target: str
-    prefix: str
+    release_dir: str
     archive: str
+    manifest: str
     lockfile: str
+    components: tuple[str, ...]
+    prefix: str
 
 
 def to_primitive(value: Any) -> Any:
