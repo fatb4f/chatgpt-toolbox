@@ -10,6 +10,7 @@ import re
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 _NAME_RE = re.compile(r"^[a-z][a-z0-9-]*$")
 _TARGET_RE = re.compile(r"^[A-Za-z0-9_.+-]+(?:-[A-Za-z0-9_.+-]+)+$")
+_GO_LINK_SYMBOL_RE = re.compile(r"^[A-Za-z0-9_./-]+$")
 
 
 class DescriptorError(ValueError):
@@ -136,6 +137,7 @@ class BuildSpec:
     trimpath: bool = True
     build_vcs: bool = False
     ldflags: tuple[str, ...] = ()
+    source_digest_symbol: str | None = None
     make_target: str | None = None
     install_target: str | None = None
     environment: Mapping[str, str] = field(default_factory=dict)
@@ -150,6 +152,14 @@ class BuildSpec:
         for flag in self.ldflags:
             if not flag or "\x00" in flag or "\n" in flag or "\r" in flag:
                 raise DescriptorError("Go linker flags must be non-empty single-line values")
+        if self.source_digest_symbol is not None:
+            symbol = _require_nonempty(
+                "Go source digest symbol", self.source_digest_symbol
+            )
+            if not _GO_LINK_SYMBOL_RE.fullmatch(symbol):
+                raise DescriptorError(
+                    f"invalid Go source digest symbol: {self.source_digest_symbol!r}"
+                )
         _validate_relative_posix("source_subdir", self.source_subdir)
 
         match self.kind:
@@ -161,6 +171,7 @@ class BuildSpec:
                     or self.install_target
                     or self.build_vcs
                     or self.ldflags
+                    or self.source_digest_symbol
                 ):
                     raise DescriptorError(
                         "no-build specifications cannot declare build commands"
@@ -170,7 +181,7 @@ class BuildSpec:
                 output = _require_nonempty("Go output", self.output)
                 _validate_relative_posix("Go output", output, allow_dot=False)
             case BuildKind.MAKE_COMMAND:
-                if self.build_vcs or self.ldflags:
+                if self.build_vcs or self.ldflags or self.source_digest_symbol:
                     raise DescriptorError(
                         "make-command specifications cannot declare Go build flags"
                     )
@@ -225,6 +236,13 @@ class ToolSpec:
         if self.acquisition.kind is AcquisitionKind.GO_MODULE and self.install:
             raise DescriptorError(
                 "go-module descriptors do not directly install archive entries"
+            )
+        if self.build.source_digest_symbol is not None and self.acquisition.kind not in {
+            AcquisitionKind.GIT_CHECKOUT,
+            AcquisitionKind.LOCAL_SOURCE,
+        }:
+            raise DescriptorError(
+                "Go source digest injection requires a Git checkout or local source"
             )
         for probe in self.probes:
             if not probe or any(not part for part in probe):
