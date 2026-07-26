@@ -8,6 +8,10 @@ from toolbox.model import (
 )
 
 DOTFILES_REVISION = "de858a831d219cae1abcd721ea11cc4779ab6a9a"
+HYDRATOR_DIGEST_SYMBOL = (
+    "github.com/fatb4f/dotfiles/.codex/context-hydrators/git/"
+    "internal/hydrator.BuildHydratorDigest"
+)
 
 SPEC = ToolSpec(
     name="context-git-hydrator",
@@ -26,6 +30,7 @@ SPEC = ToolSpec(
         output="bin/context-git-hydrator",
         build_vcs=True,
         ldflags=("-s", "-w"),
+        source_digest_symbol=HYDRATOR_DIGEST_SYMBOL,
     ),
     roles=frozenset({ToolRole.RUNTIME, ToolRole.PROGRAM}),
     probes=(),
