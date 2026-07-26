@@ -46,6 +46,7 @@ def qualify_context_git_hydrator(
         ["git", "config", "user.email", "toolbox-qualification@example.invalid"],
         cwd=repository,
     )
+    runner.run(["git", "config", "commit.gpgsign", "false"], cwd=repository)
     (repository / "fixture.txt").write_text("qualified\n", encoding="utf-8")
     runner.run(["git", "add", "fixture.txt"], cwd=repository)
     runner.run(["git", "commit", "--quiet", "-m", "qualification fixture"], cwd=repository)
